@@ -15,9 +15,17 @@ no uplink and no DNS anywhere.
 
 ## Status
 
-**Milestone 0 of 9.** The binary resolves its own directory, reads `convers.toml`, enumerates
-the model tree, and prints what it found. No audio device is opened and no model is loaded
-yet. Milestones are listed in `SPEC.md` §13 and are built in order.
+**Milestone 1 of 9.** The binary resolves its own directory, reads `convers.toml`, enumerates
+the model tree, and can capture from the microphone and cut it into utterances with Silero
+VAD. Nothing transcribes, translates or speaks yet. Milestones are listed in `SPEC.md` §13 and
+are built in order.
+
+```bash
+convers                       # what models are installed
+convers --devices             # what microphones are available
+convers --listen --wav        # listen, log each utterance, write it to logs/segments/
+convers --listen --seconds 20 # same, stopping cleanly after 20 s
+```
 
 ## Layout
 
@@ -81,6 +89,13 @@ Checks:
 cargo fmt --check
 cargo clippy --all-targets -- -D warnings
 cargo test
+```
+
+Two tests need files that are not in the repository — the VAD model, and a 16 kHz mono
+recording of someone talking — so they are `#[ignore]`d by default:
+
+```bash
+CONVERS_TEST_VAD_MODEL=/abs/path/silero_vad.onnx CONVERS_TEST_WAV=/abs/path/speech.wav cargo test -- --ignored --nocapture
 ```
 
 ## Models

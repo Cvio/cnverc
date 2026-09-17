@@ -1,13 +1,18 @@
 //! `convers` — offline speech-to-speech translation.
 //!
-//! Milestone 0: skeleton, path resolution, config load, and model discovery.
-//! No audio is opened and no model is loaded; the binary prints what it found
-//! and exits.
+//! Milestones so far: model discovery (M0), and microphone capture through
+//! voice activity detection (M1). Nothing transcribes, translates or speaks
+//! yet.
 
+mod audio;
+mod cli;
 mod config;
+mod listen;
 mod models;
 mod paths;
 mod report;
+mod vad;
+mod wav;
 
 use std::path::Path;
 
@@ -21,6 +26,12 @@ use crate::config::Config;
 use crate::models::{Entry, Role};
 
 fn main() -> Result<()> {
+    let command = cli::parse(std::env::args().skip(1))?;
+    if command == cli::Command::Help {
+        print!("{}", cli::HELP);
+        return Ok(());
+    }
+
     let root = paths::app_root().context("failed to locate the application directory")?;
 
     // Logging first, so everything after it is on the record. Held for the
@@ -33,6 +44,10 @@ fn main() -> Result<()> {
     );
     println!("app root: {}", root.display());
 
+    if command == cli::Command::Devices {
+        return print_devices();
+    }
+
     let config_path = paths::config_file(&root);
     let (config, config_found) = Config::load(&config_path)?;
     if config_found {
@@ -42,6 +57,10 @@ fn main() -> Result<()> {
             "config:   {} (not present; using defaults from SPEC §7)",
             config_path.display()
         );
+    }
+
+    if let cli::Command::Listen { seconds, write_wav } = command {
+        return listen::run(&root, &config, seconds, write_wav);
     }
 
     let models_root = paths::models_dir(&root);
@@ -69,6 +88,31 @@ fn main() -> Result<()> {
     report::print_summary(Role::Tts, &tts);
     report_selection(&config, &asr);
 
+    Ok(())
+}
+
+/// Input devices, so the user can put an exact name in `[audio].input_device`.
+fn print_devices() -> Result<()> {
+    let devices = audio::list_input_devices()?;
+    println!();
+    println!("Audio input devices");
+    if devices.is_empty() {
+        println!("  (none)");
+        return Ok(());
+    }
+    for device in devices {
+        println!(
+            "  {} {}{}",
+            if device.is_default { "*" } else { " " },
+            device.name,
+            device
+                .default_config
+                .map(|c| format!("  ({c})"))
+                .unwrap_or_default()
+        );
+    }
+    println!();
+    println!("  * = system default. Put a name in [audio].input_device to pin one.");
     Ok(())
 }
 

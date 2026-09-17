@@ -10,3 +10,6 @@
 
 # Runtime output.
 /logs/
+
+# Machine-local Claude Code session settings.
+.claude/settings.local.json

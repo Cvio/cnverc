@@ -59,5 +59,7 @@ loses. If you believe one of these is wrong, stop and say so rather than working
 
 ## Status
 
-Milestone 0 complete: skeleton, path resolution, config load, model discovery, report.
-Nothing loads a model or opens an audio device yet.
+Milestone 1 complete. M0: skeleton, path resolution, config load, model discovery, report.
+M1: cpal capture with device enumeration, resampling to 16 kHz mono at the capture boundary,
+and Silero VAD through sherpa-onnx cutting utterances. Nothing transcribes, translates or
+speaks yet; M2 is segment ASR and the dual-run harness.

@@ -1,12 +1,12 @@
-name = "Piper es_ES carlfm (x_low)"
+name = "Piper en_US lessac (medium)"
 kind = "segment"
 backend = "vits"
-languages = ["es"]
+languages = ["en"]
 
 # espeak-ng does the pronunciation for Piper voices. It is a directory, so it
 # cannot be declared under [files].
 data_dir = "espeak-ng-data"
 
 [files]
-model  = "es_ES-carlfm-x_low.onnx"
+model  = "en_US-lessac-medium.onnx"
 tokens = "tokens.txt"

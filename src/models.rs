@@ -54,11 +54,13 @@ pub enum AsrBackend {
 }
 
 /// Which sherpa-onnx `OfflineTts` model config variant a TTS directory maps to.
+///
+/// Only what convers can actually load is listed. sherpa-onnx supports several
+/// more, but claiming them in discovery and then failing at load time would
+/// put the error in the wrong place.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TtsBackend {
     Vits,
-    Matcha,
-    Kokoro,
 }
 
 /// A backend, whichever side of the pipeline it belongs to.
@@ -74,8 +76,6 @@ impl fmt::Display for Backend {
             Backend::Asr(AsrBackend::NemoTransducer) => "nemo_transducer",
             Backend::Asr(AsrBackend::Whisper) => "whisper",
             Backend::Tts(TtsBackend::Vits) => "vits",
-            Backend::Tts(TtsBackend::Matcha) => "matcha",
-            Backend::Tts(TtsBackend::Kokoro) => "kokoro",
         })
     }
 }
@@ -93,8 +93,6 @@ impl Role {
             (Role::Asr, "nemo_transducer") => Some(Backend::Asr(AsrBackend::NemoTransducer)),
             (Role::Asr, "whisper") => Some(Backend::Asr(AsrBackend::Whisper)),
             (Role::Tts, "vits") => Some(Backend::Tts(TtsBackend::Vits)),
-            (Role::Tts, "matcha") => Some(Backend::Tts(TtsBackend::Matcha)),
-            (Role::Tts, "kokoro") => Some(Backend::Tts(TtsBackend::Kokoro)),
             _ => None,
         }
     }
@@ -102,7 +100,7 @@ impl Role {
     fn known_backends(self) -> &'static [&'static str] {
         match self {
             Role::Asr => &["nemo_transducer", "whisper"],
-            Role::Tts => &["vits", "matcha", "kokoro"],
+            Role::Tts => &["vits"],
         }
     }
 }
@@ -115,8 +113,6 @@ fn required_files(backend: Backend) -> &'static [&'static str] {
         Backend::Asr(AsrBackend::NemoTransducer) => &["encoder", "decoder", "joiner", "tokens"],
         Backend::Asr(AsrBackend::Whisper) => &["encoder", "decoder", "tokens"],
         Backend::Tts(TtsBackend::Vits) => &["model", "tokens"],
-        Backend::Tts(TtsBackend::Matcha) => &["acoustic_model", "vocoder", "tokens"],
-        Backend::Tts(TtsBackend::Kokoro) => &["model", "tokens", "voices"],
     }
 }
 
@@ -169,6 +165,10 @@ pub struct ModelFile {
 /// A model directory that parsed cleanly.
 #[derive(Debug, Clone)]
 pub struct Engine {
+    /// A directory the model needs beside its files, named by `data_dir` in
+    /// `engine.toml`. Piper voices need `espeak-ng-data/` for pronunciation,
+    /// and a directory cannot be declared under `[files]`.
+    pub data_dir: Option<ModelDir>,
     /// Directory name — the identity used in `convers.toml` (SPEC §7).
     pub dir_name: String,
     pub dir: PathBuf,
@@ -181,19 +181,34 @@ pub struct Engine {
     pub files: Vec<ModelFile>,
 }
 
+/// A declared support directory and whether it is actually there.
+#[derive(Debug, Clone)]
+pub struct ModelDir {
+    pub name: String,
+    pub path: PathBuf,
+    pub present: bool,
+}
+
 impl Engine {
-    /// Filenames declared by `engine.toml` that are not on disk.
+    /// Declared files and directories that are not on disk.
     pub fn missing_files(&self) -> Vec<&str> {
-        self.files
+        let mut missing: Vec<&str> = self
+            .files
             .iter()
             .filter(|f| !f.present)
             .map(|f| f.name.as_str())
-            .collect()
+            .collect();
+        if let Some(dir) = &self.data_dir {
+            if !dir.present {
+                missing.push(dir.name.as_str());
+            }
+        }
+        missing
     }
 
-    /// Usable: every declared file is present.
+    /// Usable: everything it declares is present.
     pub fn enabled(&self) -> bool {
-        self.files.iter().all(|f| f.present)
+        self.missing_files().is_empty()
     }
 }
 
@@ -228,6 +243,9 @@ struct RawEngine {
     backend: String,
     #[serde(default)]
     languages: Vec<String>,
+    /// Optional support directory, e.g. `espeak-ng-data` for a Piper voice.
+    #[serde(default)]
+    data_dir: Option<String>,
     #[serde(default)]
     files: BTreeMap<String, String>,
 }
@@ -281,6 +299,26 @@ pub fn load_engine(dir: &Path, role: Role) -> Result<Engine, EngineError> {
         });
     }
 
+    let data_dir = match raw.data_dir {
+        None => None,
+        Some(name) => {
+            if !is_plain_filename(&name) {
+                return Err(EngineError::NotAPlainFilename {
+                    path: toml_path.clone(),
+                    role: "data_dir".to_string(),
+                    value: name,
+                });
+            }
+            let path = dir.join(&name);
+            let present = path.is_dir();
+            Some(ModelDir {
+                name,
+                path,
+                present,
+            })
+        }
+    };
+
     let dir_name = dir
         .file_name()
         .map(|n| n.to_string_lossy().into_owned())
@@ -288,6 +326,7 @@ pub fn load_engine(dir: &Path, role: Role) -> Result<Engine, EngineError> {
 
     Ok(Engine {
         dir_name,
+        data_dir,
         dir: dir.to_path_buf(),
         name: raw.name,
         kind: raw.kind,

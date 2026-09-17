@@ -1,8 +1,8 @@
 //! `convers` — offline speech-to-speech translation.
 //!
 //! Milestones so far: model discovery (M0), microphone capture through voice
-//! activity detection (M1), and segment ASR with the dual-run comparison
-//! harness (M2). Nothing translates or speaks yet.
+//! activity detection (M1), segment ASR with the dual-run comparison harness
+//! (M2), translation (M3), and speech with the half-duplex gate (M4).
 
 mod asr;
 mod audio;
@@ -12,9 +12,11 @@ mod config;
 mod listen;
 mod models;
 mod paths;
+mod playback;
 mod report;
 mod ring;
 mod translate;
+mod tts;
 mod vad;
 mod wav;
 

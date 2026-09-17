@@ -15,10 +15,10 @@ no uplink and no DNS anywhere.
 
 ## Status
 
-**Milestone 3 of 9.** The binary resolves its own directory, reads `convers.toml`, enumerates
-the model tree, captures from the microphone, cuts utterances with Silero VAD, transcribes them
-with either Parakeet or Whisper, and translates the result with a GGUF model running in
-process. Nothing speaks yet. Milestones are listed in `SPEC.md` §13 and are built in order.
+**Milestone 4 of 9.** Microphone to speakers: capture, Silero VAD, Parakeet or Whisper,
+translation with a GGUF model in process, and speech through a Piper voice — all offline. The
+user interface is still a log; the GUI is Milestone 5. Milestones are listed in `SPEC.md` §13
+and are built in order.
 
 ```bash
 convers                       # what models are installed
@@ -28,6 +28,18 @@ convers --listen --wav        # also write each utterance to logs/segments/
 convers --listen --compare    # run every engine on each utterance, side by side
 convers --listen --seconds 20 # stop cleanly after 20 s
 ```
+
+### On the translation model's size
+
+Qwen3 0.6B is small enough to run beside everything else, and it handles ordinary conversation
+well — greetings, questions, directions, instructions. It does fail on some sentences by
+handing the Spanish straight back instead of translating it, and no amount of prompt wording
+fixed that in testing; wording that stopped the echo produced *wrong* translations instead,
+which is worse. convers detects an echo and reports the utterance as failed rather than
+captioning and speaking untranslated text.
+
+If that happens too often for you, drop a larger GGUF into `models/mt/` and delete the small
+one. Nothing else changes — the filesystem is the index.
 
 `models/mt/` holds exactly one `.gguf`. There is no key in `convers.toml` naming it — §7 does
 not define one — so the filesystem is the index here too; two files is an error asking you to
@@ -164,7 +176,14 @@ page rather than assuming the one quoted here:
 | Parakeet TDT 0.6B v3, int8 | `models/asr/parakeet-tdt-0.6b-v3-int8/` | `sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8.tar.bz2` (487 MB) from the ASR release listing |
 | Whisper large-v3-turbo, int8 | `models/asr/whisper-large-v3-turbo/` | `sherpa-onnx-whisper-turbo.tar.bz2` (564 MB) from the ASR release listing — the release calls it "turbo", and the files inside are named `turbo-*` |
 | Qwen3 0.6B, Q4_K_M | `models/mt/qwen3-0.6b-q4_k_m.gguf` | `Qwen3-0.6B-Q4_K_M.gguf` (397 MB) from <https://huggingface.co/unsloth/Qwen3-0.6B-GGUF> — Qwen's own GGUF repo publishes only Q8_0 |
-| Spanish Piper voice | `models/tts/vits-piper-es_ES-carlfm-x_low/` | `vits-piper-es_ES-carlfm-x_low.tar.bz2` from the TTS release listing |
+| English Piper voice | `models/tts/vits-piper-en_US-lessac-medium/` | `vits-piper-en_US-lessac-medium.tar.bz2` (64 MB) from the TTS release listing |
+| Spanish Piper voice | `models/tts/vits-piper-es_ES-carlfm-x_low/` | `vits-piper-es_ES-carlfm-x_low.tar.bz2` (25 MB) from the TTS release listing |
+
+A voice is chosen by **language**, not by a setting: convers speaks with the installed voice
+that declares `[languages].target`. Install a voice for whichever language you translate into —
+for Spanish→English that is the English one. Piper voices also need their `espeak-ng-data`
+directory, which the archive contains and `engine.toml` names with `data_dir`, because a
+directory cannot be declared under `[files]`.
 
 Extract each archive so the model files sit **directly** in the directory named above, beside
 its `engine.toml` — not in a nested folder from the archive. Keep the published filenames. If

@@ -6,6 +6,7 @@
 
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::{sync_channel, RecvTimeoutError, SyncSender, TrySendError};
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use anyhow::{anyhow, Context, Result};
@@ -17,8 +18,10 @@ use crate::compare;
 use crate::config::Config;
 use crate::models::{self, Engine, Entry, Role};
 use crate::paths;
+use crate::playback::{Gate, Player};
 use crate::ring::{Utterance, UtteranceRing, DEFAULT_CAPACITY};
 use crate::translate::{LlamaTranslator, Translator};
+use crate::tts::{self, Voice};
 use crate::vad::{Segment, Segmenter, VadSettings};
 use crate::wav;
 
@@ -68,6 +71,26 @@ pub fn run(
         (load_selected(&engines, &selected_name)?, Vec::new())
     };
 
+    // The gate exists whether or not TTS does, so the capture loop has one
+    // thing to ask rather than two.
+    let gate = Arc::new(Gate::new(config.tts.half_duplex));
+
+    let speaking = if config.tts.enabled && !compare_engines && selected.is_some() {
+        let voices = discovered_voices(root);
+        let engine = tts::for_language(&voices, &config.languages.target)?;
+        let voice = Voice::load(engine)?;
+        let player = Player::open(&config.audio.output_device, gate.clone())?;
+        if !config.tts.half_duplex {
+            warn!(
+                "[tts].half_duplex is off: convers will hear its own speech and transcribe it \
+                 unless you are wearing headphones (SPEC §10)"
+            );
+        }
+        Some((voice, player))
+    } else {
+        None
+    };
+
     // No translator in comparison mode: with several transcripts of the same
     // utterance there is no single one to translate, and --compare is a
     // recognizer harness (SPEC §12), not the conversation path.
@@ -79,6 +102,7 @@ pub fn run(
             &model,
             config.languages.source.clone(),
             config.languages.target.clone(),
+            speaking,
         )?)
     };
     let translate_tx = translation.as_ref().map(|(tx, _)| tx.clone());
@@ -115,6 +139,7 @@ pub fn run(
     let started = Instant::now();
     let deadline = seconds.map(|n| started + Duration::from_secs(n));
     let mut level = LevelMeter::new();
+    let mut was_gated = false;
 
     loop {
         if deadline.is_some_and(|d| Instant::now() >= d) {
@@ -123,6 +148,22 @@ pub fn run(
 
         match rx.recv_timeout(POLL) {
             Ok(chunk) => {
+                // Half-duplex (SPEC §10): while our own speech is playing,
+                // captured audio is discarded and the detector is held reset,
+                // so nothing of it can survive into the next utterance.
+                if gate.is_closed() {
+                    if !was_gated {
+                        debug!("microphone gated while speaking");
+                        was_gated = true;
+                    }
+                    segmenter.reset();
+                    continue;
+                }
+                if was_gated {
+                    was_gated = false;
+                    debug!("microphone live again");
+                }
+
                 level.observe(&chunk);
                 for segment in segmenter.push(&chunk) {
                     handle(
@@ -190,6 +231,9 @@ pub fn run(
 struct ToTranslate {
     index: usize,
     text: String,
+    /// When the utterance was cut, so the speaking stage can report the whole
+    /// end-of-speech to first-audio latency (Milestone 4's check).
+    captured_at: Instant,
 }
 
 /// The translation stage runs on its own thread (SPEC §11): a slow token
@@ -200,6 +244,7 @@ fn spawn_translator(
     model: &Path,
     source: String,
     target: String,
+    speaking: Option<(Voice, Player)>,
 ) -> Result<(SyncSender<ToTranslate>, std::thread::JoinHandle<()>)> {
     let mut translator = LlamaTranslator::load(model)?;
     let (tx, rx) = sync_channel::<ToTranslate>(TRANSLATION_QUEUE);
@@ -209,18 +254,50 @@ fn spawn_translator(
         .spawn(move || {
             while let Ok(job) = rx.recv() {
                 let began = Instant::now();
-                match translator.translate(&job.text, &source, &target) {
+                let text = match translator.translate(&job.text, &source, &target) {
                     Ok(text) if text.is_empty() => {
-                        warn!("utterance {}: translated to nothing", job.index)
+                        warn!("utterance {}: translated to nothing", job.index);
+                        continue;
                     }
-                    Ok(text) => info!(
-                        "utterance {}\n  [{source}] {}\n  [{target}] {text}\n  ({} ms to \
-                         translate)",
-                        job.index,
-                        job.text,
-                        began.elapsed().as_millis()
-                    ),
-                    Err(e) => warn!("utterance {}: translation failed: {e:#}", job.index),
+                    Ok(text) => text,
+                    Err(e) => {
+                        warn!("utterance {}: translation failed: {e:#}", job.index);
+                        continue;
+                    }
+                };
+                let translated_ms = began.elapsed().as_millis();
+                info!(
+                    "utterance {}\n  [{source}] {}\n  [{target}] {text}\n  ({translated_ms} ms \
+                     to translate)",
+                    job.index, job.text
+                );
+
+                // Synthesis shares this thread with translation (SPEC §11), so
+                // neither can stall recognition.
+                let Some((voice, player)) = speaking.as_ref() else {
+                    continue;
+                };
+                match voice.speak(&text) {
+                    Ok(speech) if speech.samples.is_empty() => {
+                        warn!("utterance {}: the voice produced no audio", job.index)
+                    }
+                    Ok(speech) => {
+                        let synthesised_ms = began.elapsed().as_millis() - translated_ms;
+                        let speech_ms = speech.duration_ms();
+                        match player.play(&speech.samples, speech.sample_rate) {
+                            // Time to first audio is measured from the moment
+                            // the utterance was cut, through recognition,
+                            // translation and synthesis, to the samples
+                            // reaching the sound card (Milestone 4's check).
+                            Ok(()) => info!(
+                                "  speaking {speech_ms} ms ({synthesised_ms} ms to synthesise, \
+                                 {} ms from end of speech to first audio)",
+                                job.captured_at.elapsed().as_millis()
+                            ),
+                            Err(e) => warn!("utterance {}: cannot play: {e:#}", job.index),
+                        }
+                    }
+                    Err(e) => warn!("utterance {}: synthesis failed: {e:#}", job.index),
                 }
             }
             info!("translation stopped");
@@ -242,6 +319,7 @@ fn handle(
     translate_tx: Option<&SyncSender<ToTranslate>>,
     segments_dir: Option<&PathBuf>,
 ) {
+    let captured_at = Instant::now();
     let (start_ms, end_ms, duration_ms) =
         (segment.start_ms(), segment.end_ms(), segment.duration_ms());
     let utterance = ring.push(start_ms, segment.samples);
@@ -277,6 +355,7 @@ fn handle(
                     match tx.try_send(ToTranslate {
                         index: utterance.index,
                         text,
+                        captured_at,
                     }) {
                         Ok(()) => {}
                         Err(TrySendError::Full(job)) => warn!(
@@ -317,6 +396,17 @@ fn write_segment(utterance: &Utterance, segments_dir: Option<&PathBuf>) {
         Ok(()) => info!("  wrote {}", path.display()),
         Err(e) => warn!("  {e:#}"),
     }
+}
+
+/// Every TTS directory that parsed, whether or not its files are all present.
+fn discovered_voices(root: &Path) -> Vec<Engine> {
+    models::discover(&paths::tts_dir(root), Role::Tts)
+        .into_iter()
+        .filter_map(|entry| match entry {
+            Entry::Loaded(engine) => Some(engine),
+            Entry::Failed { .. } => None,
+        })
+        .collect()
 }
 
 /// Every ASR directory that parsed, whether or not its files are all present.
@@ -442,5 +532,94 @@ impl LevelMeter {
         self.peak = 0.0;
         self.samples = 0;
         self.last_report = Instant::now();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::tts::Voice;
+
+    /// The whole pipeline on a recording: VAD, recognition, translation and
+    /// synthesis, with the latency Milestone 4 asks to be measured. No audio
+    /// device is involved, so this runs anywhere the models are installed.
+    ///
+    /// ```bash
+    /// CONVERS_TEST_MODELS=/abs/path/models \
+    /// CONVERS_TEST_WAV_ES=/abs/path/spanish-16k.wav \
+    /// cargo test --release -- --ignored --nocapture end_to_end
+    /// ```
+    #[test]
+    #[ignore = "needs every model and a Spanish recording; see the doc comment"]
+    fn end_to_end_on_a_recording() {
+        let models_root = std::env::var("CONVERS_TEST_MODELS").expect("CONVERS_TEST_MODELS");
+        let wav_path = std::env::var("CONVERS_TEST_WAV_ES").expect("CONVERS_TEST_WAV_ES");
+        let root = Path::new(&models_root)
+            .parent()
+            .expect("models/ has a parent")
+            .to_path_buf();
+
+        let audio = wav::read_16k_mono(Path::new(&wav_path)).expect("read the recording");
+
+        let engines = discovered_engines(&root);
+        let mut asr = load_selected(&engines, "parakeet-tdt-0.6b-v3-int8")
+            .expect("load the recognizer")
+            .expect("a recognizer");
+        let mut translator =
+            LlamaTranslator::load(&models::find_translation_model(&paths::mt_dir(&root)).unwrap())
+                .expect("load the translator");
+        let voices = discovered_voices(&root);
+        let voice = Voice::load(tts::for_language(&voices, "en").expect("an English voice"))
+            .expect("load the voice");
+
+        let settings = VadSettings {
+            model: paths::vad_model_file(&root),
+            threshold: 0.5,
+            min_silence_ms: 500,
+            min_speech_ms: 250,
+        };
+        let mut segmenter = Segmenter::new(&settings).expect("load the VAD");
+
+        let mut segments = Vec::new();
+        for chunk in audio.chunks(1024) {
+            segments.extend(segmenter.push(chunk));
+        }
+        segments.extend(segmenter.flush());
+        assert!(!segments.is_empty(), "no speech in the recording");
+
+        for segment in segments.iter().take(3) {
+            // The clock starts where it starts in the real pipeline: the
+            // moment the utterance has been cut.
+            let began = Instant::now();
+
+            let spanish = asr.transcribe(&segment.samples, "es").expect("transcribe");
+            let after_asr = began.elapsed().as_millis();
+
+            let english = translator
+                .translate(&spanish, "es", "en")
+                .expect("translate");
+            let after_mt = began.elapsed().as_millis();
+
+            let speech = voice.speak(&english).expect("synthesise");
+            let to_first_audio = began.elapsed().as_millis();
+
+            println!(
+                "{} ms of speech\n  [es] {spanish}\n  [en] {english}\n  \
+                 asr {after_asr} ms, +translate {} ms, +synthesise {} ms \
+                 = {to_first_audio} ms to first audio for {} ms of speech",
+                segment.duration_ms(),
+                after_mt - after_asr,
+                to_first_audio - after_mt,
+                speech.duration_ms()
+            );
+
+            assert!(!english.is_empty(), "no translation");
+            assert!(!speech.samples.is_empty(), "no audio");
+
+            let out =
+                std::env::temp_dir().join(format!("convers-e2e-{}ms.wav", segment.start_ms()));
+            wav::write_any(&out, &speech.samples, speech.sample_rate).expect("write");
+            println!("  wrote {}", out.display());
+        }
     }
 }

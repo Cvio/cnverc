@@ -72,7 +72,11 @@ Milestone 2 complete.
   slow token stream cannot stall recognition. The prompt is constrained to translation and
   the output is stripped of reasoning, labels and quotes.
 
-Nothing speaks yet; M4 is TTS and the half-duplex gate.
+- M4: synthesis through sherpa-onnx `OfflineTts`, playback through cpal, and the half-duplex
+  gate. The voice is chosen by language, not by a config key, because §7 defines no key for it
+  and §9 says the language decides which voice speaks.
+
+Next is M5, the egui GUI.
 
 ## Build note
 

@@ -143,6 +143,17 @@ impl Segmenter {
         self.drain()
     }
 
+    /// Forget all state and any queued segments.
+    ///
+    /// The half-duplex gate (SPEC §10) holds the detector reset while TTS is
+    /// speaking, so no fragment of our own voice can survive into the next
+    /// utterance.
+    pub fn reset(&mut self) {
+        self.pending.clear();
+        self.vad.clear();
+        self.vad.reset();
+    }
+
     fn drain(&mut self) -> Vec<Segment> {
         let mut segments = Vec::new();
         while let Some(front) = self.vad.front() {

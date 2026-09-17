@@ -15,6 +15,12 @@ use crate::audio::SAMPLE_RATE;
 /// Write 16 kHz mono f32 samples as a 16-bit PCM WAV, the format every player
 /// on the target machine opens without complaint.
 pub fn write_16k_mono(path: &Path, samples: &[f32]) -> Result<()> {
+    write_any(path, samples, SAMPLE_RATE)
+}
+
+/// The same, at whatever rate the samples are. Synthesised speech comes out at
+/// the voice's own rate, not the pipeline's.
+pub fn write_any(path: &Path, samples: &[f32], sample_rate: u32) -> Result<()> {
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)
             .with_context(|| format!("cannot create {}", parent.display()))?;
@@ -22,7 +28,7 @@ pub fn write_16k_mono(path: &Path, samples: &[f32]) -> Result<()> {
 
     let spec = hound::WavSpec {
         channels: 1,
-        sample_rate: SAMPLE_RATE,
+        sample_rate,
         bits_per_sample: 16,
         sample_format: hound::SampleFormat::Int,
     };

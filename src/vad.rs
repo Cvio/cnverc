@@ -260,6 +260,55 @@ mod tests {
         );
     }
 
+    /// Does the detector clip the start of speech?
+    ///
+    /// A VAD triggers slightly after speech actually begins, and the first
+    /// phoneme is the one that disappears. This measures the gap between the
+    /// first sample with real energy in a recording and the first sample the
+    /// detector hands back.
+    ///
+    /// ```bash
+    /// CONVERS_TEST_VAD_MODEL=/abs/silero_vad.onnx     /// CONVERS_TEST_WAV=/abs/speech.wav     /// cargo test --release -- --ignored --nocapture onset
+    /// ```
+    #[test]
+    #[ignore = "needs the Silero model and a recording; see the doc comment"]
+    fn measure_onset_clipping() {
+        let model = std::env::var("CONVERS_TEST_VAD_MODEL").expect("CONVERS_TEST_VAD_MODEL");
+        let wav = std::env::var("CONVERS_TEST_WAV").expect("CONVERS_TEST_WAV");
+        let audio = crate::wav::read_16k_mono(Path::new(&wav)).expect("read the test wav");
+
+        // First sample whose short-term energy clears the noise floor.
+        let window = SAMPLE_RATE as usize / 100; // 10 ms
+        let noise_floor = 0.01_f32;
+        let first_energy = audio
+            .chunks(window)
+            .position(|w| w.iter().any(|s| s.abs() > noise_floor))
+            .map(|i| i * window)
+            .unwrap_or(0);
+
+        let mut segmenter = Segmenter::new(&settings(&model)).expect("load the VAD");
+        let mut segments = Vec::new();
+        for chunk in audio.chunks(1024) {
+            segments.extend(segmenter.push(chunk));
+        }
+        segments.extend(segmenter.flush());
+        assert!(!segments.is_empty(), "no speech found");
+
+        let first_energy_ms = first_energy as u64 * 1000 / SAMPLE_RATE as u64;
+        let first_segment_ms = segments[0].start_ms();
+        println!(
+            "energy starts at {first_energy_ms} ms, the detector starts at {first_segment_ms} ms              (clipped {} ms)",
+            first_segment_ms.saturating_sub(first_energy_ms)
+        );
+        for segment in segments.iter().take(5) {
+            println!(
+                "  segment {:>6} ms .. {:>6} ms",
+                segment.start_ms(),
+                segment.end_ms()
+            );
+        }
+    }
+
     /// End-to-end against the real model and a real recording. Both paths come
     /// from the environment because neither belongs in the repository:
     ///

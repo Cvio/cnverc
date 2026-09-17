@@ -1,0 +1,8 @@
+name = "Piper es_ES carlfm (x_low)"
+kind = "segment"
+backend = "vits"
+languages = ["es"]
+
+[files]
+model  = "es_ES-carlfm-x_low.onnx"
+tokens = "tokens.txt"

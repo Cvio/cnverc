@@ -1,0 +1,12 @@
+/target/
+
+# Model weights are never committed. Only the engine.toml descriptors are.
+*.onnx
+*.gguf
+*.bin
+*.tar.bz2
+*.tar.gz
+*.zip
+
+# Runtime output.
+/logs/

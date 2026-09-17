@@ -1,0 +1,10 @@
+name = "Parakeet TDT 0.6B v3 (int8)"
+kind = "segment"
+backend = "nemo_transducer"
+languages = ["es", "en", "de", "fr", "it", "pt", "nl", "pl", "ru"]
+
+[files]
+encoder = "encoder.int8.onnx"
+decoder = "decoder.int8.onnx"
+joiner  = "joiner.int8.onnx"
+tokens  = "tokens.txt"

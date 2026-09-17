@@ -1,0 +1,34 @@
+# convers configuration. User selections only; models are referenced by the
+# name of their directory under models/.
+
+[asr]
+engine = "parakeet-tdt-0.6b-v3-int8"
+
+[languages]
+source = "es"
+target = "en"
+
+[mode]
+kind = "turn"            # "continuous" | "turn"
+turn_key = "Space"
+turn_style = "toggle"    # "toggle" | "hold"
+
+[audio]
+input_device = ""        # empty = system default
+output_device = ""
+
+[vad]
+threshold = 0.5
+min_silence_ms = 500
+min_speech_ms = 250
+
+[tts]
+enabled = true
+half_duplex = true       # false is for headphones only
+
+[peer]
+enabled = false
+listen_addr = "0.0.0.0:47800"
+peer_addr = ""           # e.g. "192.168.50.2:47800"
+display_name = ""        # empty = hostname
+discovery = true         # convenience; manual entry always works

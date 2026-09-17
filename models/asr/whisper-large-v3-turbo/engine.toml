@@ -1,0 +1,9 @@
+name = "Whisper large-v3-turbo"
+kind = "segment"
+backend = "whisper"
+languages = ["es", "en", "de", "fr", "it", "pt", "nl", "pl", "ru"]
+
+[files]
+encoder = "large-v3-turbo-encoder.int8.onnx"
+decoder = "large-v3-turbo-decoder.int8.onnx"
+tokens  = "large-v3-turbo-tokens.txt"

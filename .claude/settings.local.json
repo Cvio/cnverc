@@ -1,0 +1,7 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(find \"D:/AI_Data/projects/live-captions/src-tauri\" -name \"*.rs\" | head -20)"
+    ]
+  }
+}

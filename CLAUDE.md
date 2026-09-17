@@ -78,6 +78,15 @@ Milestone 2 complete.
 
 Next is M5, the egui GUI.
 
+## What the translation stage refuses
+
+A 0.6B model fails in ways that are worse than failing visibly, so three
+guards in `translate.rs` reject an output rather than let it be captioned and
+spoken: an echo of the source, a recitation of the system prompt, and an
+output far longer than its input. All three were found in live sessions, not
+imagined. Do not remove one without a replacement — the failure it prevents
+is a caption and a voice asserting something the speaker never said.
+
 ## Build note
 
 Everything links against the **static CRT** (`.cargo/config.toml`). sherpa-onnx's prebuilt

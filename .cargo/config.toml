@@ -1,0 +1,31 @@
+# Build settings that are part of the project, not of one machine.
+
+[env]
+# sherpa-onnx ships its prebuilt static library built against the static CRT
+# (the "-static-MT-Release-lib" archive). llama.cpp's cmake build defaults to
+# the dynamic CRT, and MSVC refuses to link /MT and /MD objects into one
+# binary: "mismatch detected for 'RuntimeLibrary'".
+#
+# Matching llama.cpp to sherpa is also the right answer for SPEC §2.6: with the
+# static CRT the executable carries no dependency on the Visual C++
+# redistributable, so it runs on a freshly imaged machine that has never had a
+# toolchain installed.
+LLAMA_STATIC_CRT = "1"
+
+# LLAMA_STATIC_CRT alone is not enough with CMake 4: under policy CMP0091 the
+# runtime library comes from the MSVC_RUNTIME_LIBRARY target property, which
+# defaults to the DLL runtime and is applied after the flags, so /MD wins over
+# the -MT in CMAKE_C_FLAGS. llama-cpp-sys-2 forwards any CMAKE_* environment
+# variable to cmake as a cache entry, so the property is set directly here.
+CMAKE_MSVC_RUNTIME_LIBRARY = "MultiThreaded"
+
+# The remaining piece: llama-cpp-sys-2 compiles a small wrapper with the `cc`
+# crate, and `cc` chooses /MT or /MD from the Rust target feature rather than
+# from anything cmake was told. Asking for the static CRT here settles it for
+# every C and C++ object in the build at once, and the executable then has no
+# dependency on the Visual C++ redistributable at all — which is what
+# "unzip it on a freshly imaged machine and it runs" requires (SPEC §2.6).
+#
+# Windows only: the Linux path (a nice-to-have, SPEC §3) is left alone.
+[target.x86_64-pc-windows-msvc]
+rustflags = ["-C", "target-feature=+crt-static"]

@@ -14,6 +14,7 @@ mod models;
 mod paths;
 mod report;
 mod ring;
+mod translate;
 mod vad;
 mod wav;
 

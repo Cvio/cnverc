@@ -68,4 +68,16 @@ Milestone 2 complete.
   `AsrEngine` enum from SPEC §11 in place, the utterance ring buffer, and `--compare`.
   `StreamAsr` deliberately has no implementation until M8.
 
-Nothing translates or speaks yet; M3 is translation through llama-cpp-2.
+- M3: translation through `llama-cpp-2`, behind a `Translator` trait, on its own thread so a
+  slow token stream cannot stall recognition. The prompt is constrained to translation and
+  the output is stripped of reasoning, labels and quotes.
+
+Nothing speaks yet; M4 is TTS and the half-duplex gate.
+
+## Build note
+
+Everything links against the **static CRT** (`.cargo/config.toml`). sherpa-onnx's prebuilt
+library is `/MT` and llama.cpp defaults to `/MD`; MSVC will not link both. Do not "fix" a
+RuntimeLibrary mismatch by switching sherpa to the dynamic build — the static CRT is also what
+keeps the executable free of any Visual C++ redistributable dependency, which §2.6 requires.
+For the same reason `llama-cpp-2` is built without its default `openmp` feature.

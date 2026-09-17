@@ -507,3 +507,66 @@ tokens  = "tokens.txt"
         assert!(entries.is_empty());
     }
 }
+
+/// The translation model: a single GGUF in `models/mt/` (SPEC §5).
+///
+/// There is no `convers.toml` key naming it, because §7 does not define one,
+/// so the filesystem is the index here too: exactly one `.gguf` means that is
+/// the model. Two means the user has to say which by removing one, and being
+/// told that is better than convers picking for them (SPEC §15).
+pub fn find_translation_model(mt_dir: &Path) -> Result<PathBuf, TranslationModelError> {
+    let read_dir =
+        std::fs::read_dir(mt_dir).map_err(|source| TranslationModelError::Unreadable {
+            path: mt_dir.to_path_buf(),
+            source,
+        })?;
+
+    let mut found: Vec<PathBuf> = read_dir
+        .filter_map(|entry| entry.ok())
+        .map(|entry| entry.path())
+        .filter(|path| {
+            path.is_file()
+                && path
+                    .extension()
+                    .is_some_and(|ext| ext.eq_ignore_ascii_case("gguf"))
+        })
+        .collect();
+    found.sort();
+
+    match found.len() {
+        0 => Err(TranslationModelError::None {
+            path: mt_dir.to_path_buf(),
+        }),
+        1 => Ok(found.remove(0)),
+        _ => Err(TranslationModelError::Several {
+            path: mt_dir.to_path_buf(),
+            names: found
+                .iter()
+                .filter_map(|p| p.file_name())
+                .map(|n| n.to_string_lossy().into_owned())
+                .collect(),
+        }),
+    }
+}
+
+/// Why no single translation model could be identified.
+#[derive(Debug, Error)]
+pub enum TranslationModelError {
+    #[error("cannot read {path}: {source}")]
+    Unreadable {
+        path: PathBuf,
+        #[source]
+        source: std::io::Error,
+    },
+    #[error(
+        "no .gguf translation model in {path}\nconvers never downloads models; put one there \
+         (see README.md) and run again."
+    )]
+    None { path: PathBuf },
+    #[error(
+        "{path} holds {} translation models ({}); convers.toml has no key to choose between \
+         them, so leave exactly one in place",
+        names.len(), names.join(", ")
+    )]
+    Several { path: PathBuf, names: Vec<String> },
+}

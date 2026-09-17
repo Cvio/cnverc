@@ -5,7 +5,7 @@
 //! slow LLM cannot stall recognition.
 
 use std::path::{Path, PathBuf};
-use std::sync::mpsc::{sync_channel, RecvTimeoutError};
+use std::sync::mpsc::{sync_channel, RecvTimeoutError, SyncSender, TrySendError};
 use std::time::{Duration, Instant};
 
 use anyhow::{anyhow, Context, Result};
@@ -18,6 +18,7 @@ use crate::config::Config;
 use crate::models::{self, Engine, Entry, Role};
 use crate::paths;
 use crate::ring::{Utterance, UtteranceRing, DEFAULT_CAPACITY};
+use crate::translate::{LlamaTranslator, Translator};
 use crate::vad::{Segment, Segmenter, VadSettings};
 use crate::wav;
 
@@ -30,6 +31,11 @@ const POLL: Duration = Duration::from_millis(100);
 /// How often to report the input level while nothing is being said. Without
 /// this, a muted microphone and a silent room look identical.
 const LEVEL_REPORT: Duration = Duration::from_secs(5);
+
+/// Transcripts queued for translation. Short on purpose: if the translator
+/// falls this far behind, the conversation has already moved on and saying so
+/// is better than growing a backlog.
+const TRANSLATION_QUEUE: usize = 4;
 
 pub fn run(
     root: &Path,
@@ -61,6 +67,21 @@ pub fn run(
     } else {
         (load_selected(&engines, &selected_name)?, Vec::new())
     };
+
+    // No translator in comparison mode: with several transcripts of the same
+    // utterance there is no single one to translate, and --compare is a
+    // recognizer harness (SPEC §12), not the conversation path.
+    let translation = if compare_engines || selected.is_none() {
+        None
+    } else {
+        let model = models::find_translation_model(&paths::mt_dir(root))?;
+        Some(spawn_translator(
+            &model,
+            config.languages.source.clone(),
+            config.languages.target.clone(),
+        )?)
+    };
+    let translate_tx = translation.as_ref().map(|(tx, _)| tx.clone());
 
     let settings = VadSettings {
         model: paths::vad_model_file(root),
@@ -111,6 +132,7 @@ pub fn run(
                         &mut comparison_engines,
                         &selected_name,
                         &language,
+                        translate_tx.as_ref(),
                         write_wav.then_some(&segments_dir),
                     );
                 }
@@ -134,12 +156,20 @@ pub fn run(
             &mut comparison_engines,
             &selected_name,
             &language,
+            translate_tx.as_ref(),
             write_wav.then_some(&segments_dir),
         );
     }
 
     let dropped = capture.dropped_chunks();
     capture.stop();
+
+    // Close the queue and let the translator finish what it already has.
+    drop(translate_tx);
+    if let Some((tx, thread)) = translation {
+        drop(tx);
+        let _ = thread.join();
+    }
 
     info!(
         "listened for {:.1} s, {} utterance(s) retained, dropped {dropped} chunk(s)",
@@ -156,6 +186,50 @@ pub fn run(
     Ok(())
 }
 
+/// One transcript on its way to the translator.
+struct ToTranslate {
+    index: usize,
+    text: String,
+}
+
+/// The translation stage runs on its own thread (SPEC §11): a slow token
+/// stream must never stall recognition. The model is loaded here, on the
+/// caller's thread, so a missing or broken GGUF is an error from this call
+/// rather than a thread that quietly dies later.
+fn spawn_translator(
+    model: &Path,
+    source: String,
+    target: String,
+) -> Result<(SyncSender<ToTranslate>, std::thread::JoinHandle<()>)> {
+    let mut translator = LlamaTranslator::load(model)?;
+    let (tx, rx) = sync_channel::<ToTranslate>(TRANSLATION_QUEUE);
+
+    let thread = std::thread::Builder::new()
+        .name("convers-translate".to_string())
+        .spawn(move || {
+            while let Ok(job) = rx.recv() {
+                let began = Instant::now();
+                match translator.translate(&job.text, &source, &target) {
+                    Ok(text) if text.is_empty() => {
+                        warn!("utterance {}: translated to nothing", job.index)
+                    }
+                    Ok(text) => info!(
+                        "utterance {}\n  [{source}] {}\n  [{target}] {text}\n  ({} ms to \
+                         translate)",
+                        job.index,
+                        job.text,
+                        began.elapsed().as_millis()
+                    ),
+                    Err(e) => warn!("utterance {}: translation failed: {e:#}", job.index),
+                }
+            }
+            info!("translation stopped");
+        })
+        .context("cannot spawn the translation thread")?;
+
+    Ok((tx, thread))
+}
+
 /// Transcribe one utterance, keep it, and report it.
 #[allow(clippy::too_many_arguments)]
 fn handle(
@@ -165,6 +239,7 @@ fn handle(
     comparison_engines: &mut [(String, Box<dyn SegmentAsr + Send>)],
     selected_name: &str,
     language: &str,
+    translate_tx: Option<&SyncSender<ToTranslate>>,
     segments_dir: Option<&PathBuf>,
 ) {
     let (start_ms, end_ms, duration_ms) =
@@ -191,11 +266,29 @@ fn handle(
             // The segment duration travels with the timing, always: Whisper
             // pads to 30 s internally and the number is meaningless alone
             // (SPEC §10).
-            Ok(text) => info!(
-                "  [{language}] {text}\n  ({} ms to transcribe {} ms of audio)",
-                began.elapsed().as_millis(),
-                utterance.duration_ms()
-            ),
+            Ok(text) => {
+                info!(
+                    "  [{language}] {text}\n  ({} ms to transcribe {} ms of audio)",
+                    began.elapsed().as_millis(),
+                    utterance.duration_ms()
+                );
+                if let Some(tx) = translate_tx {
+                    // Never block the pipeline thread on the translator.
+                    match tx.try_send(ToTranslate {
+                        index: utterance.index,
+                        text,
+                    }) {
+                        Ok(()) => {}
+                        Err(TrySendError::Full(job)) => warn!(
+                            "translation is behind; utterance {} not translated",
+                            job.index
+                        ),
+                        Err(TrySendError::Disconnected(_)) => {
+                            warn!("the translation thread has stopped")
+                        }
+                    }
+                }
+            }
             Err(e) => warn!("  transcription failed: {e:#}"),
         }
     }

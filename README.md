@@ -15,10 +15,10 @@ no uplink and no DNS anywhere.
 
 ## Status
 
-**Milestone 2 of 9.** The binary resolves its own directory, reads `convers.toml`, enumerates
-the model tree, captures from the microphone, cuts utterances with Silero VAD, and transcribes
-them with either Parakeet or Whisper. Nothing translates or speaks yet. Milestones are listed
-in `SPEC.md` §13 and are built in order.
+**Milestone 3 of 9.** The binary resolves its own directory, reads `convers.toml`, enumerates
+the model tree, captures from the microphone, cuts utterances with Silero VAD, transcribes them
+with either Parakeet or Whisper, and translates the result with a GGUF model running in
+process. Nothing speaks yet. Milestones are listed in `SPEC.md` §13 and are built in order.
 
 ```bash
 convers                       # what models are installed
@@ -28,6 +28,10 @@ convers --listen --wav        # also write each utterance to logs/segments/
 convers --listen --compare    # run every engine on each utterance, side by side
 convers --listen --seconds 20 # stop cleanly after 20 s
 ```
+
+`models/mt/` holds exactly one `.gguf`. There is no key in `convers.toml` naming it — §7 does
+not define one — so the filesystem is the index here too; two files is an error asking you to
+remove one rather than convers choosing for you.
 
 `--compare` exists because published word error rates are measured on read speech, not on your
 microphone and your accent (`SPEC.md` §12). It prints each engine's transcript with the wall
@@ -65,6 +69,37 @@ cargo build --release
 
 Rust stable, 2021 edition. There is no JavaScript toolchain, no `package.json`, and no
 webview; the GUI (from Milestone 5) is native `egui` compiled into the binary.
+
+**Build prerequisites on Windows:** MSVC (Visual Studio Build Tools) and **cmake**, because
+`llama-cpp-2` compiles llama.cpp from source. Build Tools ships a cmake that is not on `PATH`
+by default; either install cmake separately or add the bundled one for the build:
+
+```bash
+export PATH="$PATH:/c/Program Files (x86)/Microsoft Visual Studio/18/BuildTools/Common7/IDE/CommonExtensions/Microsoft/CMake/CMake/bin"
+```
+
+### Everything links against the static CRT
+
+`.cargo/config.toml` sets `LLAMA_STATIC_CRT`, `CMAKE_MSVC_RUNTIME_LIBRARY` and
+`-C target-feature=+crt-static`. This is not a preference. sherpa-onnx ships its prebuilt
+static library built against the static CRT, llama.cpp's cmake build defaults to the dynamic
+one, and MSVC refuses to link the two together:
+
+```
+error LNK2038: mismatch detected for 'RuntimeLibrary': value 'MT_StaticRelease'
+doesn't match value 'MD_DynamicRelease'
+```
+
+Matching everything to the static CRT is also what §2.6 needs: the executable then depends on
+no Visual C++ redistributable. `llama-cpp-2`'s default `openmp` feature is off for the same
+reason — it links `VCOMP140.DLL`, which a freshly imaged machine may not have. The result
+depends on Windows system DLLs only:
+
+```
+kernel32.dll  advapi32.dll  ole32.dll  oleaut32.dll  dbghelp.dll  setupapi.dll  dxgi.dll  ntdll.dll
+```
+
+Worth re-checking with `dumpbin -dependents convers.exe` whenever a dependency is added.
 
 ### Build-time internet caveat (applies from Milestone 1)
 
@@ -128,7 +163,7 @@ page rather than assuming the one quoted here:
 | Silero VAD | `models/vad/silero_vad.onnx` | `silero_vad.onnx` from <https://github.com/snakers4/silero-vad> (`files/silero_vad.onnx`), or the copy in the sherpa-onnx VAD release assets |
 | Parakeet TDT 0.6B v3, int8 | `models/asr/parakeet-tdt-0.6b-v3-int8/` | `sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8.tar.bz2` (487 MB) from the ASR release listing |
 | Whisper large-v3-turbo, int8 | `models/asr/whisper-large-v3-turbo/` | `sherpa-onnx-whisper-turbo.tar.bz2` (564 MB) from the ASR release listing — the release calls it "turbo", and the files inside are named `turbo-*` |
-| Qwen3 0.6B, Q4_K_M | `models/mt/qwen3-0.6b-q4_k_m.gguf` | `Qwen3-0.6B-Q4_K_M.gguf` from <https://huggingface.co/Qwen/Qwen3-0.6B-GGUF> |
+| Qwen3 0.6B, Q4_K_M | `models/mt/qwen3-0.6b-q4_k_m.gguf` | `Qwen3-0.6B-Q4_K_M.gguf` (397 MB) from <https://huggingface.co/unsloth/Qwen3-0.6B-GGUF> — Qwen's own GGUF repo publishes only Q8_0 |
 | Spanish Piper voice | `models/tts/vits-piper-es_ES-carlfm-x_low/` | `vits-piper-es_ES-carlfm-x_low.tar.bz2` from the TTS release listing |
 
 Extract each archive so the model files sit **directly** in the directory named above, beside

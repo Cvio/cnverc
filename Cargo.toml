@@ -17,6 +17,11 @@ tracing-appender = "0.2"
 sherpa-onnx = "1.13.8"
 cpal = "0.16.0"
 hound = "3.5.1"
+# default features pull in openmp, which links VCOMP140.DLL from the Visual C++
+# redistributable — a runtime dependency a freshly imaged machine may not have
+# (SPEC §2.6). llama.cpp has its own threadpool and does not need it.
+llama-cpp-2 = { version = "0.1.156", default-features = false, features = ["common"] }
+encoding_rs = "0.8.35"
 
 [profile.release]
 opt-level = 3

@@ -59,7 +59,13 @@ loses. If you believe one of these is wrong, stop and say so rather than working
 
 ## Status
 
-Milestone 1 complete. M0: skeleton, path resolution, config load, model discovery, report.
-M1: cpal capture with device enumeration, resampling to 16 kHz mono at the capture boundary,
-and Silero VAD through sherpa-onnx cutting utterances. Nothing transcribes, translates or
-speaks yet; M2 is segment ASR and the dual-run harness.
+Milestone 2 complete.
+
+- M0: skeleton, path resolution, config load, model discovery, report.
+- M1: cpal capture with device enumeration, resampling to 16 kHz mono at the capture
+  boundary, and Silero VAD through sherpa-onnx cutting utterances.
+- M2: `SegmentAsr` for Parakeet (nemo_transducer) and Whisper, both traits and the
+  `AsrEngine` enum from SPEC §11 in place, the utterance ring buffer, and `--compare`.
+  `StreamAsr` deliberately has no implementation until M8.
+
+Nothing translates or speaks yet; M3 is translation through llama-cpp-2.

@@ -10,12 +10,14 @@ pub enum Command {
     Report,
     /// List audio input devices and exit.
     Devices,
-    /// Capture from the microphone and log the utterances the VAD cuts.
+    /// Capture from the microphone, transcribe, and log the result.
     Listen {
         /// Stop after this many seconds. `None` = until Ctrl-C.
         seconds: Option<u64>,
         /// Write each utterance to `logs/segments/` as a WAV.
         write_wav: bool,
+        /// Run every enabled segment engine on each utterance (SPEC §12).
+        compare: bool,
     },
     Help,
 }
@@ -29,11 +31,13 @@ USAGE:
 COMMANDS:
     (none)              Print the discovered models and exit
     --devices           List audio input devices and exit
-    --listen            Capture from the microphone and log detected speech
+    --listen            Capture from the microphone and transcribe
 
 OPTIONS FOR --listen:
     --seconds <N>       Stop cleanly after N seconds (otherwise: Ctrl-C)
     --wav               Write each detected utterance to logs/segments/
+    --compare           Run every enabled engine on each utterance and print
+                        transcripts, timings and segment durations side by side
 
     -h, --help          Show this message
 
@@ -53,9 +57,11 @@ pub fn parse<I: IntoIterator<Item = String>>(args: I) -> Result<Command> {
         "--listen" => {
             let mut seconds = None;
             let mut write_wav = false;
+            let mut compare = false;
             while let Some(arg) = args.next() {
                 match arg.as_str() {
                     "--wav" => write_wav = true,
+                    "--compare" => compare = true,
                     "--seconds" => {
                         let value = args
                             .next()
@@ -69,7 +75,11 @@ pub fn parse<I: IntoIterator<Item = String>>(args: I) -> Result<Command> {
                     other => return Err(unknown(other)),
                 }
             }
-            Ok(Command::Listen { seconds, write_wav })
+            Ok(Command::Listen {
+                seconds,
+                write_wav,
+                compare,
+            })
         }
         other => Err(unknown(other)),
     }
@@ -105,14 +115,28 @@ mod tests {
             parse_args(&["--listen", "--wav", "--seconds", "20"]).unwrap(),
             Command::Listen {
                 seconds: Some(20),
-                write_wav: true
+                write_wav: true,
+                compare: false
             }
         );
         assert_eq!(
             parse_args(&["--listen", "--seconds", "5"]).unwrap(),
             Command::Listen {
                 seconds: Some(5),
-                write_wav: false
+                write_wav: false,
+                compare: false
+            }
+        );
+    }
+
+    #[test]
+    fn compare_is_a_listen_option() {
+        assert_eq!(
+            parse_args(&["--listen", "--compare"]).unwrap(),
+            Command::Listen {
+                seconds: None,
+                write_wav: false,
+                compare: true
             }
         );
     }

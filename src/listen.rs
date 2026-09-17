@@ -1,20 +1,23 @@
-//! Milestone 1's runnable path: capture → VAD → log.
+//! The runnable pipeline so far: capture → VAD → ASR → log.
 //!
-//! This is the shape the pipeline thread will keep. It owns the VAD, reads
-//! 16 kHz mono chunks from the capture thread, and reports each utterance the
-//! detector cuts. From Milestone 2 the utterances go to an ASR engine instead
-//! of only to the log.
+//! This thread is the pipeline thread of SPEC §11: it owns the VAD and the
+//! recognizer. Translation and TTS get their own thread from Milestone 3, so a
+//! slow LLM cannot stall recognition.
 
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::{sync_channel, RecvTimeoutError};
 use std::time::{Duration, Instant};
 
-use anyhow::{Context, Result};
+use anyhow::{anyhow, Context, Result};
 use tracing::{info, warn};
 
+use crate::asr::{self, AsrEngine, SegmentAsr};
 use crate::audio::{self, SAMPLE_RATE};
+use crate::compare;
 use crate::config::Config;
+use crate::models::{self, Engine, Entry, Role};
 use crate::paths;
+use crate::ring::{Utterance, UtteranceRing, DEFAULT_CAPACITY};
 use crate::vad::{Segment, Segmenter, VadSettings};
 use crate::wav;
 
@@ -28,7 +31,37 @@ const POLL: Duration = Duration::from_millis(100);
 /// this, a muted microphone and a silent room look identical.
 const LEVEL_REPORT: Duration = Duration::from_secs(5);
 
-pub fn run(root: &Path, config: &Config, seconds: Option<u64>, write_wav: bool) -> Result<()> {
+pub fn run(
+    root: &Path,
+    config: &Config,
+    seconds: Option<u64>,
+    write_wav: bool,
+    compare_engines: bool,
+) -> Result<()> {
+    let engines = discovered_engines(root);
+    let language = config.languages.source.clone();
+    let selected_name = config.asr.engine.trim().to_string();
+
+    // Resolve the selection before opening the microphone: a missing or
+    // half-extracted model should fail before the device lights up.
+    check_selection(&engines, &selected_name)?;
+
+    // In comparison mode every engine runs on every utterance, the configured
+    // one included, so loading it separately would hold a second copy of the
+    // same model in memory for nothing.
+    let (mut selected, mut comparison_engines) = if compare_engines {
+        let loaded = asr::load_all_segment_engines(&engines);
+        if loaded.len() < 2 {
+            warn!(
+                "--compare has only {} usable segment engine(s); the comparison needs at least two",
+                loaded.len()
+            );
+        }
+        (None, loaded)
+    } else {
+        (load_selected(&engines, &selected_name)?, Vec::new())
+    };
+
     let settings = VadSettings {
         model: paths::vad_model_file(root),
         threshold: config.vad.threshold,
@@ -48,6 +81,8 @@ pub fn run(root: &Path, config: &Config, seconds: Option<u64>, write_wav: bool) 
         info!("writing utterances to {}", segments_dir.display());
     }
 
+    let mut ring = UtteranceRing::new(DEFAULT_CAPACITY);
+
     let (tx, rx) = sync_channel::<Vec<f32>>(PIPELINE_QUEUE_CHUNKS);
     let capture = audio::spawn_capture(&config.audio.input_device, tx)?;
 
@@ -59,7 +94,6 @@ pub fn run(root: &Path, config: &Config, seconds: Option<u64>, write_wav: bool) 
     let started = Instant::now();
     let deadline = seconds.map(|n| started + Duration::from_secs(n));
     let mut level = LevelMeter::new();
-    let mut count = 0usize;
 
     loop {
         if deadline.is_some_and(|d| Instant::now() >= d) {
@@ -70,8 +104,15 @@ pub fn run(root: &Path, config: &Config, seconds: Option<u64>, write_wav: bool) 
             Ok(chunk) => {
                 level.observe(&chunk);
                 for segment in segmenter.push(&chunk) {
-                    count += 1;
-                    report(count, &segment, write_wav.then_some(&segments_dir));
+                    handle(
+                        segment,
+                        &mut ring,
+                        selected.as_mut(),
+                        &mut comparison_engines,
+                        &selected_name,
+                        &language,
+                        write_wav.then_some(&segments_dir),
+                    );
                 }
             }
             Err(RecvTimeoutError::Timeout) => {}
@@ -86,18 +127,26 @@ pub fn run(root: &Path, config: &Config, seconds: Option<u64>, write_wav: bool) 
 
     // Whatever was still being spoken when time ran out.
     for segment in segmenter.flush() {
-        count += 1;
-        report(count, &segment, write_wav.then_some(&segments_dir));
+        handle(
+            segment,
+            &mut ring,
+            selected.as_mut(),
+            &mut comparison_engines,
+            &selected_name,
+            &language,
+            write_wav.then_some(&segments_dir),
+        );
     }
 
     let dropped = capture.dropped_chunks();
     capture.stop();
 
     info!(
-        "listened for {:.1} s, detected {count} utterance(s), dropped {dropped} chunk(s)",
-        started.elapsed().as_secs_f32()
+        "listened for {:.1} s, {} utterance(s) retained, dropped {dropped} chunk(s)",
+        started.elapsed().as_secs_f32(),
+        ring.len()
     );
-    if count == 0 {
+    if ring.len() == 0 {
         info!(
             "no speech detected. If that is wrong, check --devices, check the level reports \
              above, and consider lowering [vad].threshold from {}.",
@@ -107,23 +156,142 @@ pub fn run(root: &Path, config: &Config, seconds: Option<u64>, write_wav: bool) 
     Ok(())
 }
 
-fn report(index: usize, segment: &Segment, segments_dir: Option<&PathBuf>) {
+/// Transcribe one utterance, keep it, and report it.
+#[allow(clippy::too_many_arguments)]
+fn handle(
+    segment: Segment,
+    ring: &mut UtteranceRing,
+    selected: Option<&mut Box<dyn SegmentAsr + Send>>,
+    comparison_engines: &mut [(String, Box<dyn SegmentAsr + Send>)],
+    selected_name: &str,
+    language: &str,
+    segments_dir: Option<&PathBuf>,
+) {
+    let (start_ms, end_ms, duration_ms) =
+        (segment.start_ms(), segment.end_ms(), segment.duration_ms());
+    let utterance = ring.push(start_ms, segment.samples);
+
     info!(
-        "utterance {index}: {} ms .. {} ms ({} ms)",
-        segment.start_ms(),
-        segment.end_ms(),
-        segment.duration_ms()
+        "utterance {}: {start_ms} ms .. {end_ms} ms ({duration_ms} ms)",
+        utterance.index
     );
+
+    if let Some(asr) = selected {
+        let began = Instant::now();
+        match asr.transcribe(&utterance.pcm, language) {
+            // The segment duration travels with the timing, always: Whisper
+            // pads to 30 s internally and the number is meaningless alone
+            // (SPEC §10).
+            Ok(text) => info!(
+                "  [{language}] {text}\n  ({} ms to transcribe {} ms of audio)",
+                began.elapsed().as_millis(),
+                utterance.duration_ms()
+            ),
+            Err(e) => warn!("  transcription failed: {e:#}"),
+        }
+    }
+
+    if !comparison_engines.is_empty() {
+        let comparison = compare::run_all(comparison_engines, &utterance, language);
+        compare::print(&comparison, selected_name);
+    }
+
+    write_segment(&utterance, segments_dir);
+}
+
+fn write_segment(utterance: &Utterance, segments_dir: Option<&PathBuf>) {
     let Some(dir) = segments_dir else {
         return;
     };
+    // Named by its timestamp as well as its index: the ring is keyed by when
+    // the utterance happened, and the files should match (SPEC §12).
     let path = dir.join(format!(
-        "utterance-{index:04}-{}ms.wav",
-        segment.duration_ms()
+        "utterance-{:04}-at-{}ms-for-{}ms.wav",
+        utterance.index,
+        utterance.start_ms,
+        utterance.duration_ms()
     ));
-    match wav::write_16k_mono(&path, &segment.samples) {
+    match wav::write_16k_mono(&path, &utterance.pcm) {
         Ok(()) => info!("  wrote {}", path.display()),
         Err(e) => warn!("  {e:#}"),
+    }
+}
+
+/// Every ASR directory that parsed, whether or not its files are all present.
+fn discovered_engines(root: &Path) -> Vec<Engine> {
+    models::discover(&paths::asr_dir(root), Role::Asr)
+        .into_iter()
+        .filter_map(|entry| match entry {
+            Entry::Loaded(engine) => Some(engine),
+            Entry::Failed { .. } => None,
+        })
+        .collect()
+}
+
+/// Resolve `[asr].engine` to a discovered model. Never substitutes another one
+/// (SPEC §15).
+fn find_selected<'a>(engines: &'a [Engine], selected: &str) -> Result<&'a Engine> {
+    engines
+        .iter()
+        .find(|e| e.dir_name == selected)
+        .ok_or_else(|| {
+            anyhow!(
+                "[asr].engine = \"{selected}\" was not found. Discovered: {}",
+                if engines.is_empty() {
+                    "nothing".to_string()
+                } else {
+                    engines
+                        .iter()
+                        .map(|e| e.dir_name.as_str())
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                }
+            )
+        })
+}
+
+/// Fail on a selection that cannot work, without paying to load it first. An
+/// unset selection is allowed: it listens without transcribing, which is the
+/// Milestone 1 behaviour and still the way to check a microphone.
+fn check_selection(engines: &[Engine], selected: &str) -> Result<()> {
+    if selected.is_empty() {
+        warn!("[asr].engine is unset; listening without transcribing");
+        return Ok(());
+    }
+    let engine = find_selected(engines, selected)?;
+    let missing = engine.missing_files();
+    if !missing.is_empty() {
+        return Err(anyhow!(
+            "[asr].engine = \"{selected}\" is incomplete; these files are not in {}: {}",
+            engine.dir.display(),
+            missing.join(", ")
+        ));
+    }
+    Ok(())
+}
+
+/// Load the configured engine for ordinary (non-comparison) listening.
+fn load_selected(engines: &[Engine], selected: &str) -> Result<Option<Box<dyn SegmentAsr + Send>>> {
+    if selected.is_empty() {
+        return Ok(None);
+    }
+    let engine = find_selected(engines, selected)?;
+
+    let began = Instant::now();
+    match asr::load(engine)? {
+        AsrEngine::Segment(asr) => {
+            info!(
+                "loaded \"{}\" ({}) in {} ms",
+                engine.dir_name,
+                engine.name,
+                began.elapsed().as_millis()
+            );
+            Ok(Some(asr))
+        }
+        AsrEngine::Stream(_) => Err(anyhow!(
+            "\"{}\" is a streaming engine; streaming arrives in Milestone 8",
+            engine.dir_name
+        )),
     }
 }
 
@@ -159,7 +327,10 @@ impl LevelMeter {
         }
         let seconds = self.samples as f32 / SAMPLE_RATE as f32;
         if self.peak <= 0.0 {
-            warn!("input level: digital silence over the last {seconds:.0} s — is the microphone muted?");
+            warn!(
+                "input level: digital silence over the last {seconds:.0} s — is the microphone \
+                 muted?"
+            );
         } else {
             info!(
                 "input level: peak {:.1} dBFS over the last {seconds:.0} s",

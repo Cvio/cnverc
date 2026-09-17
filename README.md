@@ -15,17 +15,24 @@ no uplink and no DNS anywhere.
 
 ## Status
 
-**Milestone 1 of 9.** The binary resolves its own directory, reads `convers.toml`, enumerates
-the model tree, and can capture from the microphone and cut it into utterances with Silero
-VAD. Nothing transcribes, translates or speaks yet. Milestones are listed in `SPEC.md` §13 and
-are built in order.
+**Milestone 2 of 9.** The binary resolves its own directory, reads `convers.toml`, enumerates
+the model tree, captures from the microphone, cuts utterances with Silero VAD, and transcribes
+them with either Parakeet or Whisper. Nothing translates or speaks yet. Milestones are listed
+in `SPEC.md` §13 and are built in order.
 
 ```bash
 convers                       # what models are installed
 convers --devices             # what microphones are available
-convers --listen --wav        # listen, log each utterance, write it to logs/segments/
-convers --listen --seconds 20 # same, stopping cleanly after 20 s
+convers --listen              # listen and transcribe with the configured engine
+convers --listen --wav        # also write each utterance to logs/segments/
+convers --listen --compare    # run every engine on each utterance, side by side
+convers --listen --seconds 20 # stop cleanly after 20 s
 ```
+
+`--compare` exists because published word error rates are measured on read speech, not on your
+microphone and your accent (`SPEC.md` §12). It prints each engine's transcript with the wall
+clock time and the duration of the audio, always together: Whisper pads every utterance to a
+30-second window internally, so a 1-second utterance costs it about what a 20-second one does.
 
 ## Layout
 
@@ -95,8 +102,13 @@ Two tests need files that are not in the repository — the VAD model, and a 16 
 recording of someone talking — so they are `#[ignore]`d by default:
 
 ```bash
-CONVERS_TEST_VAD_MODEL=/abs/path/silero_vad.onnx CONVERS_TEST_WAV=/abs/path/speech.wav cargo test -- --ignored --nocapture
+CONVERS_TEST_VAD_MODEL=/abs/path/silero_vad.onnx CONVERS_TEST_WAV=/abs/path/speech.wav CONVERS_TEST_MODELS=/abs/path/models CONVERS_TEST_WAV_ES=/abs/path/spanish-16k.wav cargo test --release -- --ignored --nocapture
 ```
+
+Both recordings must be 16 kHz mono: the pipeline resamples at the capture boundary and
+nowhere else, and the test reader refuses to introduce a second resampling path. The Parakeet
+archive ships `test_wavs/es.wav`, which is 22050 Hz — convert it once with
+`ffmpeg -i es.wav -ar 16000 -ac 1 es-16k.wav`.
 
 ## Models
 
@@ -114,8 +126,8 @@ page rather than assuming the one quoted here:
 | What | Where it goes | Source |
 |---|---|---|
 | Silero VAD | `models/vad/silero_vad.onnx` | `silero_vad.onnx` from <https://github.com/snakers4/silero-vad> (`files/silero_vad.onnx`), or the copy in the sherpa-onnx VAD release assets |
-| Parakeet TDT 0.6B v3, int8 | `models/asr/parakeet-tdt-0.6b-v3-int8/` | `sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8.tar.bz2` from the ASR release listing |
-| Whisper large-v3-turbo | `models/asr/whisper-large-v3-turbo/` | the `sherpa-onnx-whisper-large-v3-turbo` archive from the ASR release listing |
+| Parakeet TDT 0.6B v3, int8 | `models/asr/parakeet-tdt-0.6b-v3-int8/` | `sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8.tar.bz2` (487 MB) from the ASR release listing |
+| Whisper large-v3-turbo, int8 | `models/asr/whisper-large-v3-turbo/` | `sherpa-onnx-whisper-turbo.tar.bz2` (564 MB) from the ASR release listing — the release calls it "turbo", and the files inside are named `turbo-*` |
 | Qwen3 0.6B, Q4_K_M | `models/mt/qwen3-0.6b-q4_k_m.gguf` | `Qwen3-0.6B-Q4_K_M.gguf` from <https://huggingface.co/Qwen/Qwen3-0.6B-GGUF> |
 | Spanish Piper voice | `models/tts/vits-piper-es_ES-carlfm-x_low/` | `vits-piper-es_ES-carlfm-x_low.tar.bz2` from the TTS release listing |
 

@@ -1,16 +1,19 @@
 //! `convers` — offline speech-to-speech translation.
 //!
-//! Milestones so far: model discovery (M0), and microphone capture through
-//! voice activity detection (M1). Nothing transcribes, translates or speaks
-//! yet.
+//! Milestones so far: model discovery (M0), microphone capture through voice
+//! activity detection (M1), and segment ASR with the dual-run comparison
+//! harness (M2). Nothing translates or speaks yet.
 
+mod asr;
 mod audio;
 mod cli;
+mod compare;
 mod config;
 mod listen;
 mod models;
 mod paths;
 mod report;
+mod ring;
 mod vad;
 mod wav;
 
@@ -59,8 +62,13 @@ fn main() -> Result<()> {
         );
     }
 
-    if let cli::Command::Listen { seconds, write_wav } = command {
-        return listen::run(&root, &config, seconds, write_wav);
+    if let cli::Command::Listen {
+        seconds,
+        write_wav,
+        compare,
+    } = command
+    {
+        return listen::run(&root, &config, seconds, write_wav, compare);
     }
 
     let models_root = paths::models_dir(&root);

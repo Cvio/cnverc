@@ -36,7 +36,7 @@ const DEVICE_QUEUE_CHUNKS: usize = 64;
 /// How often the capture thread wakes to check the stop flag while idle.
 const POLL: Duration = Duration::from_millis(100);
 
-/// An input device as offered to the user.
+/// An audio device as offered to the user, for input or output.
 #[derive(Debug, Clone)]
 pub struct InputDevice {
     pub name: String,
@@ -65,6 +65,42 @@ pub fn list_input_devices() -> Result<Vec<InputDevice>> {
             }
         };
         let default_config = device.default_input_config().ok().map(|c| {
+            format!(
+                "{} ch, {} Hz, {:?}",
+                c.channels(),
+                c.sample_rate().0,
+                c.sample_format()
+            )
+        });
+        devices.push(InputDevice {
+            is_default: Some(&name) == default_name.as_ref(),
+            name,
+            default_config,
+        });
+    }
+    Ok(devices)
+}
+
+/// Enumerate output devices, so a name can be put in `[audio].output_device`.
+/// Playback lives in its own module, but device enumeration belongs beside
+/// capture's: the two lists are read together and printed together.
+pub fn list_output_devices() -> Result<Vec<InputDevice>> {
+    let host = cpal::default_host();
+    let default_name = host.default_output_device().and_then(|d| d.name().ok());
+
+    let mut devices = Vec::new();
+    for device in host
+        .output_devices()
+        .context("cannot enumerate output devices")?
+    {
+        let name = match device.name() {
+            Ok(name) => name,
+            Err(e) => {
+                warn!("skipping an output device that has no name: {e}");
+                continue;
+            }
+        };
+        let default_config = device.default_output_config().ok().map(|c| {
             format!(
                 "{} ch, {} Hz, {:?}",
                 c.channels(),

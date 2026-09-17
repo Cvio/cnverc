@@ -102,14 +102,29 @@ fn main() -> Result<()> {
     Ok(())
 }
 
-/// Input devices, so the user can put an exact name in `[audio].input_device`.
+/// Audio devices, so the user can put exact names in `[audio]`.
 fn print_devices() -> Result<()> {
-    let devices = audio::list_input_devices()?;
+    print_device_list(
+        "Audio input devices",
+        "[audio].input_device",
+        audio::list_input_devices()?,
+    );
+    print_device_list(
+        "Audio output devices",
+        "[audio].output_device",
+        audio::list_output_devices()?,
+    );
     println!();
-    println!("Audio input devices");
+    println!("  * = system default. Leave the setting empty to follow it.");
+    Ok(())
+}
+
+fn print_device_list(title: &str, setting: &str, devices: Vec<audio::InputDevice>) {
+    println!();
+    println!("{title}  ({setting})");
     if devices.is_empty() {
         println!("  (none)");
-        return Ok(());
+        return;
     }
     for device in devices {
         println!(
@@ -122,9 +137,6 @@ fn print_devices() -> Result<()> {
                 .unwrap_or_default()
         );
     }
-    println!();
-    println!("  * = system default. Put a name in [audio].input_device to pin one.");
-    Ok(())
 }
 
 /// VAD and translation are single files rather than model directories, so they

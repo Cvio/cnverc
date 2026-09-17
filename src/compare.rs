@@ -11,6 +11,8 @@
 
 use std::time::Instant;
 
+use tracing::info;
+
 use crate::asr::SegmentAsr;
 use crate::ring::Utterance;
 
@@ -71,11 +73,20 @@ pub fn run_all(
     }
 }
 
-/// Print a comparison to stdout. This is program output, not a log line: it is
-/// the thing the harness exists to produce.
-pub fn print(comparison: &Comparison, selected_engine: &str) {
-    println!();
-    println!(
+/// Report a comparison. It goes through `tracing`, so it reaches the terminal
+/// *and* `logs/`: the whole point of the harness is to produce numbers worth
+/// keeping, and a table that only ever existed in a scrollback is not that.
+pub fn report(comparison: &Comparison, selected_engine: &str) {
+    info!("\n{}", format_table(comparison, selected_engine));
+}
+
+/// The table itself, so tests can read what the harness would show.
+pub fn format_table(comparison: &Comparison, selected_engine: &str) -> String {
+    use std::fmt::Write as _;
+
+    let mut out = String::new();
+    let _ = writeln!(
+        out,
         "utterance {} at {} ms — {} ms of audio",
         comparison.utterance_index, comparison.start_ms, comparison.segment_ms
     );
@@ -98,7 +109,8 @@ pub fn print(comparison: &Comparison, selected_engine: &str) {
         };
         // The configured engine is marked, so the comparison also answers
         // "which of these am I actually using?".
-        println!(
+        let _ = writeln!(
+            out,
             "  {} {:<width$}  {:>6} ms{realtime}",
             if run.engine == selected_engine {
                 "*"
@@ -108,8 +120,18 @@ pub fn print(comparison: &Comparison, selected_engine: &str) {
             run.engine,
             run.elapsed_ms
         );
-        println!("      {}{}", if run.ok { "" } else { "FAILED: " }, run.text);
+        let _ = writeln!(
+            out,
+            "      {}{}",
+            if run.ok { "" } else { "FAILED: " },
+            if run.text.is_empty() {
+                "(no text)"
+            } else {
+                &run.text
+            }
+        );
     }
+    out
 }
 
 #[cfg(test)]
@@ -163,6 +185,34 @@ mod tests {
         assert_eq!(comparison.runs[0].text, "hola");
         assert_eq!(comparison.runs[1].text, "Hola.");
         assert!(comparison.runs.iter().all(|r| r.ok));
+    }
+
+    #[test]
+    fn the_table_marks_the_configured_engine_and_keeps_the_duration() {
+        let mut engines: Vec<(String, Box<dyn SegmentAsr + Send>)> = vec![
+            (
+                "parakeet".to_string(),
+                Box::new(Fake {
+                    reply: "hola",
+                    fail: false,
+                }),
+            ),
+            (
+                "whisper".to_string(),
+                Box::new(Fake {
+                    reply: "",
+                    fail: false,
+                }),
+            ),
+        ];
+        let comparison = run_all(&mut engines, &utterance(), "es");
+        let table = format_table(&comparison, "whisper");
+
+        assert!(table.contains("1000 ms of audio"), "{table}");
+        assert!(table.contains("* whisper"), "{table}");
+        assert!(!table.contains("* parakeet"), "{table}");
+        // An engine that returned nothing says so, rather than a blank line.
+        assert!(table.contains("(no text)"), "{table}");
     }
 
     #[test]

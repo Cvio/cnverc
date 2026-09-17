@@ -319,7 +319,10 @@ mod tests {
         let mut ring = crate::ring::UtteranceRing::new(1);
         let utterance = ring.push(0, pcm);
         let comparison = crate::compare::run_all(&mut loaded, &utterance, "es");
-        crate::compare::print(&comparison, "parakeet-tdt-0.6b-v3-int8");
+        println!(
+            "{}",
+            crate::compare::format_table(&comparison, "parakeet-tdt-0.6b-v3-int8")
+        );
 
         assert_eq!(comparison.runs.len(), loaded.len());
         for run in &comparison.runs {

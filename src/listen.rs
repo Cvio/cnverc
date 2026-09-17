@@ -9,7 +9,7 @@ use std::sync::mpsc::{sync_channel, RecvTimeoutError};
 use std::time::{Duration, Instant};
 
 use anyhow::{anyhow, Context, Result};
-use tracing::{info, warn};
+use tracing::{debug, info, warn};
 
 use crate::asr::{self, AsrEngine, SegmentAsr};
 use crate::audio::{self, SAMPLE_RATE};
@@ -179,6 +179,15 @@ fn handle(
     if let Some(asr) = selected {
         let began = Instant::now();
         match asr.transcribe(&utterance.pcm, language) {
+            // A recognizer finding no words is normal: the VAD cuts on energy,
+            // so a cough or a chair passes its threshold. Say so quietly rather
+            // than emitting an empty transcript that every later stage — the
+            // translator above all — would have to special-case.
+            Ok(text) if text.trim().is_empty() => debug!(
+                "  no words in {} ms of audio ({} ms to decide)",
+                utterance.duration_ms(),
+                began.elapsed().as_millis()
+            ),
             // The segment duration travels with the timing, always: Whisper
             // pads to 30 s internally and the number is meaningless alone
             // (SPEC §10).
@@ -193,7 +202,7 @@ fn handle(
 
     if !comparison_engines.is_empty() {
         let comparison = compare::run_all(comparison_engines, &utterance, language);
-        compare::print(&comparison, selected_name);
+        compare::report(&comparison, selected_name);
     }
 
     write_segment(&utterance, segments_dir);

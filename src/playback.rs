@@ -490,7 +490,8 @@ mod tests {
             } else {
                 assert!(
                     heard > 0,
-                    "the loopback delivered nothing, so this test proves nothing: check that                      playback and capture really are two ends of one cable"
+                    "the loopback delivered nothing, so this test proves nothing: check that \
+                     playback and capture really are two ends of one cable"
                 );
             }
         }

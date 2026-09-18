@@ -556,6 +556,93 @@ mod tests {
         }
     }
 
+    /// The live test script, as clean text, so translation is measured on its
+    /// own and recognition errors cannot leak into the score. Each pair is the
+    /// same sentence in both languages, so the reference for one direction is
+    /// the source for the other.
+    const SCRIPT: [(&str, &str); 10] = [
+        ("Hello, good morning.", "Hola, buenos días."),
+        ("My cat is in the kitchen.", "Mi gato está en la cocina."),
+        ("Let's go to the store.", "Vamos a la tienda."),
+        (
+            "Where is the train station?",
+            "¿Dónde está la estación de tren?",
+        ),
+        ("How old are you?", "¿Cuántos años tienes?"),
+        ("Please close the door.", "Cierra la puerta, por favor."),
+        (
+            "I would like a coffee with milk.",
+            "Quisiera un café con leche.",
+        ),
+        (
+            "The train leaves at nine in the morning.",
+            "El tren sale a las nueve de la mañana.",
+        ),
+        (
+            "Don't ask what your country can do for you.",
+            "No preguntes qué puede hacer tu país por ti.",
+        ),
+        (
+            "Can you tell me where I can find a good restaurant near here?",
+            "¿Puedes decirme dónde encuentro un buen restaurante cerca de aquí?",
+        ),
+    ];
+
+    /// Both directions of the script through one GGUF, with every refusal
+    /// named and every translation timed. A bench, not an assertion: whether
+    /// a translation is right is read from the output.
+    ///
+    /// ```bash
+    /// CONVERS_TEST_GGUF=/abs/path/model.gguf \
+    /// cargo test --release -- --ignored --nocapture bench_both_directions
+    /// ```
+    #[test]
+    #[ignore = "needs a translation GGUF; see the doc comment"]
+    fn bench_both_directions() {
+        let path = std::env::var("CONVERS_TEST_GGUF").expect("CONVERS_TEST_GGUF");
+        let mut translator = LlamaTranslator::load(Path::new(&path)).expect("load");
+        println!("model: {path}");
+
+        for (source, target) in [("en", "es"), ("es", "en")] {
+            println!("\n=== {source} -> {target}");
+            let mut refused = 0;
+            let mut total_ms = 0u128;
+            for (n, (en, es)) in SCRIPT.iter().enumerate() {
+                let (text, reference) = if source == "en" { (en, es) } else { (es, en) };
+                let began = std::time::Instant::now();
+                let result = translator.translate(text, source, target);
+                let ms = began.elapsed().as_millis();
+                total_ms += ms;
+                let shown = match result {
+                    Ok(out) => out,
+                    Err(e) => {
+                        refused += 1;
+                        let e = e.to_string();
+                        let why = if e.contains("unchanged") {
+                            "echo"
+                        } else if e.contains("recited") {
+                            "recited prompt"
+                        } else if e.contains("characters for a") {
+                            "too long"
+                        } else {
+                            "error"
+                        };
+                        format!("REFUSED ({why})")
+                    }
+                };
+                println!(
+                    "{:>2}. {text}\n    -> {shown}   [{ms} ms]\n    ref {reference}",
+                    n + 1
+                );
+            }
+            println!(
+                "--- {source} -> {target}: {refused} refused of {}, {} ms average",
+                SCRIPT.len(),
+                total_ms / SCRIPT.len() as u128
+            );
+        }
+    }
+
     /// Try prompt variants against the sentences that fail, to find out which
     /// instruction is making the model echo its input.
     ///

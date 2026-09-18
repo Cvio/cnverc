@@ -39,15 +39,23 @@ packaging decision for Milestone 9.
 
 ### On the translation model's size
 
-Qwen3 0.6B is small enough to run beside everything else, and it handles ordinary conversation
-well — greetings, questions, directions, instructions. It does fail on some sentences by
-handing the Spanish straight back instead of translating it, and no amount of prompt wording
-fixed that in testing; wording that stopped the echo produced *wrong* translations instead,
-which is worse. convers detects an echo and reports the utterance as failed rather than
-captioning and speaking untranslated text.
+The recommended model is **Qwen3 1.7B**. It started as 0.6B, which is smaller and faster but
+was not good enough: measured on the same twenty test sentences (the `bench_both_directions`
+test), the two compare like this.
 
-If that happens too often for you, drop a larger GGUF into `models/mt/` and delete the small
-one. Nothing else changes — the filesystem is the index.
+| Model (Q4_K_M) | English→Spanish | Spanish→English | Per sentence (CPU) |
+|---|---|---|---|
+| Qwen3 0.6B | 1 of 10 correct; 7 handed back untranslated | 9 of 10 | ~0.35 s |
+| Qwen3 1.7B | 10 of 10 usable | 10 of 10 | ~0.9 s |
+
+The 0.6B fails by handing the source straight back, or occasionally by producing a confident
+wrong answer. No prompt wording fixed that; wording that stopped the echo produced wrong
+translations instead. convers refuses an echo rather than captioning and speaking untranslated
+text, but only a better model fixes a wrong answer.
+
+To change model, put a different Qwen3 GGUF in `models/mt/` and move the old one out. Nothing
+else changes, because the filesystem is the index. It must be a Qwen3 model: the prompt is
+written for Qwen's chat format.
 
 `models/mt/` holds exactly one `.gguf`. There is no key in `convers.toml` naming it — §7 does
 not define one — so the filesystem is the index here too; two files is an error asking you to
@@ -183,7 +191,7 @@ page rather than assuming the one quoted here:
 | Silero VAD | `models/vad/silero_vad.onnx` | `silero_vad.onnx` from <https://github.com/snakers4/silero-vad> (`files/silero_vad.onnx`), or the copy in the sherpa-onnx VAD release assets |
 | Parakeet TDT 0.6B v3, int8 | `models/asr/parakeet-tdt-0.6b-v3-int8/` | `sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8.tar.bz2` (487 MB) from the ASR release listing |
 | Whisper large-v3-turbo, int8 | `models/asr/whisper-large-v3-turbo/` | `sherpa-onnx-whisper-turbo.tar.bz2` (564 MB) from the ASR release listing — the release calls it "turbo", and the files inside are named `turbo-*` |
-| Qwen3 0.6B, Q4_K_M | `models/mt/qwen3-0.6b-q4_k_m.gguf` | `Qwen3-0.6B-Q4_K_M.gguf` (397 MB) from <https://huggingface.co/unsloth/Qwen3-0.6B-GGUF> — Qwen's own GGUF repo publishes only Q8_0 |
+| Qwen3 1.7B, Q4_K_M | `models/mt/qwen3-1.7b-q4_k_m.gguf` | `Qwen3-1.7B-Q4_K_M.gguf` (1.1 GB) from <https://huggingface.co/unsloth/Qwen3-1.7B-GGUF>, saved under the lower-case name shown. Qwen's own GGUF repositories publish only Q8_0. The smaller `Qwen3-0.6B-Q4_K_M.gguf` (397 MB, <https://huggingface.co/unsloth/Qwen3-0.6B-GGUF>) also works but translates English→Spanish poorly; see above |
 | English Piper voice | `models/tts/vits-piper-en_US-lessac-medium/` | `vits-piper-en_US-lessac-medium.tar.bz2` (64 MB) from the TTS release listing |
 | Spanish Piper voice | `models/tts/vits-piper-es_ES-carlfm-x_low/` | `vits-piper-es_ES-carlfm-x_low.tar.bz2` (25 MB) from the TTS release listing |
 

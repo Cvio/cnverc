@@ -71,8 +71,8 @@ pub struct LlamaTranslator {
 
 impl LlamaTranslator {
     /// Load a GGUF. CPU only: the ASR and TTS models are the ones that want
-    /// the 8GB of VRAM, and a 0.6B at Q4 decodes a sentence in well under a
-    /// second on the CPU.
+    /// the 8GB of VRAM, and Qwen3 1.7B at Q4 translates a sentence in about
+    /// 0.9 s on the CPU.
     pub fn load(path: &Path) -> Result<Self> {
         if !path.is_file() {
             return Err(anyhow!(

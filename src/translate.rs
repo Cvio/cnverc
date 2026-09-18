@@ -35,9 +35,11 @@ const CONTEXT_TOKENS: u32 = 1024;
 /// long that can stall the pipeline.
 const MAX_OUTPUT_TOKENS: usize = 256;
 
-/// Threads for decoding. The recognizer is on another thread and the machine
-/// is also running a desktop session (SPEC §3).
-const THREADS: i32 = 4;
+/// Threads for decoding. Measured with Qwen3 1.7B on the target laptop's 6
+/// performance cores: about 1,010 ms a sentence at 4 threads, 840 ms at 6,
+/// and no better at 8. The recognizer also uses 6, on its own thread; the two
+/// only overlap when a new utterance arrives while the last is translating.
+const THREADS: i32 = 6;
 
 /// The translation stage, behind a trait so the pipeline does not care what is
 /// underneath and tests can substitute something instant.

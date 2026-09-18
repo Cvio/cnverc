@@ -20,10 +20,13 @@ use tracing::info;
 use crate::audio::SAMPLE_RATE;
 use crate::models::{AsrBackend, Backend, Engine, EngineKind};
 
-/// Threads each recognizer may use. One engine is resident per selection, but
-/// `--compare` loads several at once and they share a laptop with a desktop
-/// session (SPEC §3).
-const NUM_THREADS: i32 = 2;
+/// Threads each recognizer may use. Measured on the target laptop, an i7-12700H
+/// with 6 performance and 8 efficiency cores: Whisper large-v3-turbo on a 1.8 s
+/// utterance took 1,951 ms at 2 threads, 1,325 ms at 6, and 1,947 ms at 12,
+/// because past the performance cores extra threads land on efficiency cores
+/// and hold the rest back. `--compare` runs its engines one after another, so
+/// they do not compete for these.
+const NUM_THREADS: i32 = 6;
 
 /// A loaded recognizer, in whichever of the two shapes it has.
 ///

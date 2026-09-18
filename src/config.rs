@@ -3,6 +3,10 @@
 //! The file holds exactly the keys §7 lists and nothing else. Models are
 //! referenced by the name of their directory under `models/`; no paths, no
 //! hashes, no ids.
+//!
+//! A key left out of a section takes its §7 default: the file is meant to be
+//! written by hand, and a missing line should not stop convers starting. A key
+//! that is not in §7 is still an error, because it is almost always a typo.
 
 use std::path::Path;
 
@@ -29,14 +33,14 @@ pub struct Config {
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
+#[serde(default, deny_unknown_fields)]
 pub struct Asr {
     /// Directory name under `models/asr/`. Empty = nothing selected yet.
     pub engine: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
+#[serde(default, deny_unknown_fields)]
 pub struct Languages {
     pub source: String,
     pub target: String,
@@ -57,7 +61,7 @@ pub enum TurnStyle {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
+#[serde(default, deny_unknown_fields)]
 pub struct Mode {
     pub kind: ModeKind,
     /// Window-focused key only. Never a global hotkey (SPEC §8).
@@ -66,7 +70,7 @@ pub struct Mode {
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
+#[serde(default, deny_unknown_fields)]
 pub struct Audio {
     /// Empty = system default.
     pub input_device: String,
@@ -74,7 +78,7 @@ pub struct Audio {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
+#[serde(default, deny_unknown_fields)]
 pub struct Vad {
     pub threshold: f32,
     pub min_silence_ms: u32,
@@ -82,7 +86,7 @@ pub struct Vad {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
+#[serde(default, deny_unknown_fields)]
 pub struct Tts {
     pub enabled: bool,
     /// Gate capture while speaking (SPEC §10). False is for headphones only.
@@ -90,7 +94,7 @@ pub struct Tts {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
+#[serde(default, deny_unknown_fields)]
 pub struct Peer {
     pub enabled: bool,
     pub listen_addr: String,
@@ -217,6 +221,24 @@ impl Config {
             "output_device",
             self.audio.output_device.as_str(),
         );
+        set(
+            &mut doc,
+            "mode",
+            "kind",
+            match self.mode.kind {
+                ModeKind::Continuous => "continuous",
+                ModeKind::Turn => "turn",
+            },
+        );
+        set(
+            &mut doc,
+            "mode",
+            "turn_style",
+            match self.mode.turn_style {
+                TurnStyle::Toggle => "toggle",
+                TurnStyle::Hold => "hold",
+            },
+        );
         set(&mut doc, "tts", "enabled", self.tts.enabled);
         set(&mut doc, "tts", "half_duplex", self.tts.half_duplex);
 
@@ -226,12 +248,19 @@ impl Config {
 }
 
 /// Set one key, keeping any comment that sat beside the old value.
+///
+/// A section the file does not have yet is added as an ordinary `[section]`
+/// at the end, not as an inline table at the top: it has to read like the
+/// rest of the file.
 fn set(
     doc: &mut toml_edit::DocumentMut,
     table: &str,
     key: &str,
     value: impl Into<toml_edit::Value>,
 ) {
+    if !doc.contains_key(table) {
+        doc.insert(table, toml_edit::Item::Table(toml_edit::Table::new()));
+    }
     let mut value = value.into();
     if let Some(old) = doc
         .get(table)
@@ -329,6 +358,14 @@ discovery = true
             saved.contains("engine = \"whisper-large-v3-turbo\""),
             "{saved}"
         );
+        // The file had no [mode] or [audio]; they are added as sections, and
+        // the result still loads. Saving once produced a partial inline [mode]
+        // that the next start refused to parse.
+        assert!(saved.contains("[mode]"), "{saved}");
+        assert!(
+            !saved.contains("mode = {"),
+            "added as an inline table:\n{saved}"
+        );
         let reloaded: Config = toml::from_str(&saved).expect("the saved file must parse");
         assert_eq!(reloaded.audio.output_device, "Speakers");
         assert_eq!(reloaded.vad.threshold, 0.35, "an untouched key changed");
@@ -343,6 +380,17 @@ discovery = true
         let _ = std::fs::remove_file(&path);
         assert!(result.is_err());
         assert_eq!(after, "[asr\nengine = ", "the broken file was replaced");
+    }
+
+    #[test]
+    fn a_key_left_out_takes_its_default() {
+        let config: Config =
+            toml::from_str("[vad]\nthreshold = 0.35\n\n[mode]\nkind = \"continuous\"\n")
+                .expect("a partial section must load");
+        assert_eq!(config.vad.threshold, 0.35);
+        assert_eq!(config.vad.min_silence_ms, 500);
+        assert_eq!(config.mode.kind, ModeKind::Continuous);
+        assert_eq!(config.mode.turn_key, "Space");
     }
 
     #[test]

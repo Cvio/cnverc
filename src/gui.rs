@@ -6,6 +6,12 @@
 //! both audio devices, speech on or off, the half-duplex gate, the comparison
 //! harness, and a caption pane with a latency readout underneath.
 //!
+//! Milestone 6 adds the two modes of SPEC §8: continuous listening, and turns
+//! taken with a key. The turn key is taken out of the input before any widget
+//! runs, so it never also presses whatever button has focus, and a large
+//! indicator shows at a glance whether convers is ready, recording, or
+//! processing.
+//!
 //! The window never talks to a model or a device. It starts a [`Pipeline`],
 //! reads [`PipelineMsg`]s (SPEC §11), and draws them. What the messages do to
 //! the window's state lives in [`Session`], which has no egui in it and is
@@ -20,10 +26,10 @@ use eframe::egui::{self, Color32, RichText};
 
 use crate::audio::{self, InputDevice};
 use crate::compare::Comparison;
-use crate::config::Config;
+use crate::config::{Config, ModeKind, TurnStyle};
 use crate::models::{self, AsrBackend, Backend, Engine, Entry, Role};
 use crate::paths;
-use crate::pipeline::{self, Options, Pipeline, PipelineMsg};
+use crate::pipeline::{self, Options, Pipeline, PipelineCmd, PipelineMsg};
 use crate::translate::language_name;
 use crate::tts;
 
@@ -63,6 +69,19 @@ pub enum RunState {
     /// Loading models; carries what is being loaded.
     Starting(String),
     Listening,
+}
+
+/// Where a turn is: the three states SPEC §8 requires to be told apart at a
+/// glance.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TurnState {
+    /// Waiting for the turn key. The microphone is closed.
+    Idle,
+    /// A turn is open. The microphone is live.
+    Recording,
+    /// The turn has ended and its words are being recognised, translated and
+    /// spoken.
+    Processing,
 }
 
 /// One recognised utterance and everything that happened to it afterwards.
@@ -108,6 +127,11 @@ pub struct Session {
     /// Whether this run compares recognizers, which turns translation and
     /// speech off. Said on screen, not only in a tooltip.
     pub comparing: bool,
+    /// The mode the pipeline says it is in. `None` until it has said.
+    pub mode: Option<ModeKind>,
+    pub turn: TurnState,
+    /// Whether replies are spoken, which decides when a turn is finished.
+    pub speaks: bool,
 }
 
 impl Default for Session {
@@ -120,21 +144,50 @@ impl Default for Session {
             last_error: None,
             languages: (String::new(), String::new()),
             comparing: false,
+            mode: None,
+            turn: TurnState::Idle,
+            speaks: false,
         }
     }
 }
 
 impl Session {
     /// A run is starting with these settings.
-    pub fn begin(&mut self, source: &str, target: &str, comparing: bool) {
+    pub fn begin(&mut self, source: &str, target: &str, comparing: bool, speaks: bool) {
         self.last_error = None;
         self.languages = (source.to_string(), target.to_string());
         self.comparing = comparing;
+        // Comparing turns speech off, so a turn is finished without it.
+        self.speaks = speaks && !comparing;
+        self.mode = None;
+        self.turn = TurnState::Idle;
         self.state = RunState::Starting("models".to_string());
     }
 
     pub fn apply(&mut self, msg: PipelineMsg) {
+        // Whatever ends a turn's journey returns the indicator to ready: the
+        // reply finishing, or any reason there will be no reply.
+        let finishes_turn = match &msg {
+            PipelineMsg::SpeakingEnded
+            | PipelineMsg::NothingRecognized { .. }
+            | PipelineMsg::NotTranslated { .. }
+            | PipelineMsg::Comparison(_)
+            | PipelineMsg::Error(_) => true,
+            PipelineMsg::Translated { .. } => !self.speaks,
+            _ => false,
+        };
+
         match msg {
+            PipelineMsg::Mode(mode) => {
+                self.mode = Some(mode);
+                self.turn = TurnState::Idle;
+            }
+            PipelineMsg::TurnStarted => self.turn = TurnState::Recording,
+            PipelineMsg::TurnEnded => {
+                self.turn = TurnState::Processing;
+                // The microphone is closed; a frozen meter would say otherwise.
+                self.level_db = None;
+            }
             PipelineMsg::Loading(what) => self.state = RunState::Starting(what),
             PipelineMsg::Listening => {
                 self.state = RunState::Listening;
@@ -193,7 +246,13 @@ impl Session {
                 self.state = RunState::Stopped;
                 self.speaking = false;
                 self.level_db = None;
+                self.mode = None;
+                self.turn = TurnState::Idle;
             }
+        }
+
+        if finishes_turn && self.turn == TurnState::Processing {
+            self.turn = TurnState::Idle;
         }
     }
 
@@ -222,6 +281,44 @@ impl Session {
     }
 }
 
+/// What the turn key did this frame.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub struct KeyEdges {
+    pub pressed: bool,
+    pub released: bool,
+}
+
+/// Take the turn key out of this frame's input, and say what it did.
+///
+/// A focused egui widget treats Space as a click by looking for it among the
+/// frame's key events. Removing those events before any widget runs is what
+/// stops the turn key from also pressing whichever button has focus (SPEC §8).
+/// The space the bar would type is removed too. Key-repeat presses, which a
+/// held key produces many of, are not new presses.
+pub fn take_turn_key(input: &mut egui::InputState, key: egui::Key) -> KeyEdges {
+    let mut edges = KeyEdges::default();
+    input.events.retain(|event| match event {
+        egui::Event::Key {
+            key: k,
+            pressed,
+            repeat,
+            ..
+        } if *k == key => {
+            if *pressed && !*repeat {
+                edges.pressed = true;
+            }
+            if !*pressed {
+                edges.released = true;
+            }
+            false
+        }
+        egui::Event::Text(text) if key == egui::Key::Space && text == " " => false,
+        _ => true,
+    });
+    input.keys_down.remove(&key);
+    edges
+}
+
 // ---------------------------------------------------------------------------
 // The window.
 // ---------------------------------------------------------------------------
@@ -243,6 +340,12 @@ struct App {
     events_tx: Sender<PipelineMsg>,
     /// Problems the window itself has, as opposed to the pipeline's.
     notice: Option<String>,
+    /// The key that takes a turn: `[mode].turn_key`.
+    turn_key: egui::Key,
+    /// In hold style, whether the key is down. Tracked here rather than read
+    /// from the turn state, so a tap shorter than the pipeline's reply still
+    /// ends the turn it began.
+    holding: bool,
 }
 
 impl App {
@@ -260,9 +363,20 @@ impl App {
             events,
             events_tx,
             notice: None,
+            turn_key: egui::Key::Space,
+            holding: false,
             root,
             config,
         };
+        match egui::Key::from_name(&app.config.mode.turn_key) {
+            Some(key) => app.turn_key = key,
+            None => {
+                app.notice = Some(format!(
+                    "[mode].turn_key = \"{}\" is not a key convers knows; using Space",
+                    app.config.mode.turn_key
+                ))
+            }
+        }
         app.rediscover();
         app
     }
@@ -281,10 +395,12 @@ impl App {
     }
 
     fn start(&mut self) {
+        self.holding = false;
         self.session.begin(
             &self.config.languages.source,
             &self.config.languages.target,
             self.compare,
+            self.config.tts.enabled,
         );
         let options = Options {
             write_wav: false,
@@ -305,9 +421,145 @@ impl App {
     }
 
     fn stop(&mut self) {
+        self.holding = false;
         if let Some(pipeline) = &self.pipeline {
             pipeline.stop();
         }
+    }
+
+    /// Turn the key's presses and releases into turns.
+    fn handle_turn_key(&mut self, edges: KeyEdges, window_focused: bool) {
+        let Some(pipeline) = &self.pipeline else {
+            return;
+        };
+        if self.session.mode != Some(ModeKind::Turn) || self.session.state != RunState::Listening {
+            return;
+        }
+        match self.config.mode.turn_style {
+            TurnStyle::Toggle => {
+                if edges.pressed {
+                    pipeline.send(if self.session.turn == TurnState::Recording {
+                        PipelineCmd::EndTurn
+                    } else {
+                        PipelineCmd::BeginTurn
+                    });
+                }
+            }
+            TurnStyle::Hold => {
+                if edges.pressed && !self.holding {
+                    self.holding = true;
+                    pipeline.send(PipelineCmd::BeginTurn);
+                }
+                // A window that loses focus with the key down never hears it
+                // come up; that release has to be assumed, or the microphone
+                // stays open with nobody holding the key.
+                if self.holding && (edges.released || !window_focused) {
+                    self.holding = false;
+                    pipeline.send(PipelineCmd::EndTurn);
+                }
+            }
+        }
+    }
+
+    /// The mode, which unlike every other setting can change while running
+    /// (SPEC §8).
+    fn mode_controls(&mut self, ui: &mut egui::Ui) {
+        let key = self.turn_key.name();
+        let before = (self.config.mode.kind, self.config.mode.turn_style);
+
+        ui.label("Mode");
+        ui.radio_value(&mut self.config.mode.kind, ModeKind::Turn, "Take turns");
+        ui.radio_value(
+            &mut self.config.mode.kind,
+            ModeKind::Continuous,
+            "Listen continuously",
+        );
+        if self.config.mode.kind == ModeKind::Turn {
+            ui.indent("turn style", |ui| {
+                ui.radio_value(
+                    &mut self.config.mode.turn_style,
+                    TurnStyle::Toggle,
+                    format!("Press {key} to start, again to stop"),
+                );
+                ui.radio_value(
+                    &mut self.config.mode.turn_style,
+                    TurnStyle::Hold,
+                    format!("Hold {key} while speaking"),
+                );
+                ui.weak("Change the key with [mode].turn_key in convers.toml.");
+            });
+        }
+
+        if (self.config.mode.kind, self.config.mode.turn_style) != before {
+            self.holding = false;
+            if self.config.mode.kind != before.0 {
+                if let Some(pipeline) = &self.pipeline {
+                    pipeline.send(PipelineCmd::SetMode(self.config.mode.kind));
+                }
+            }
+            self.save();
+        }
+    }
+
+    /// The indicator of SPEC §8: whether convers is ready, recording or
+    /// processing, readable from across a desk. Colour and word both change,
+    /// so neither has to be relied on alone.
+    fn indicator(&self, ui: &mut egui::Ui) {
+        const GREY: Color32 = Color32::from_rgb(70, 74, 82);
+        const SLATE: Color32 = Color32::from_rgb(52, 78, 110);
+        const RED: Color32 = Color32::from_rgb(196, 40, 40);
+        const AMBER: Color32 = Color32::from_rgb(190, 125, 20);
+        const GREEN: Color32 = Color32::from_rgb(38, 130, 70);
+        const BLUE: Color32 = Color32::from_rgb(40, 100, 170);
+
+        let key = self.turn_key.name();
+        let hold = self.config.mode.turn_style == TurnStyle::Hold;
+        let s = &self.session;
+        let (text, fill) = match (&s.state, s.mode, s.turn) {
+            (RunState::Stopped, ..) => ("STOPPED".to_string(), GREY),
+            (RunState::Starting(_), ..) => ("LOADING…".to_string(), GREY),
+            (RunState::Listening, Some(ModeKind::Turn), TurnState::Recording) => (
+                if hold {
+                    format!("● RECORDING — release {key} to finish")
+                } else {
+                    format!("● RECORDING — press {key} to finish")
+                },
+                RED,
+            ),
+            (RunState::Listening, Some(ModeKind::Turn), TurnState::Processing) => (
+                if s.speaking {
+                    "SPEAKING".to_string()
+                } else {
+                    "PROCESSING…".to_string()
+                },
+                AMBER,
+            ),
+            (RunState::Listening, Some(ModeKind::Turn), TurnState::Idle) => (
+                if hold {
+                    format!("READY — hold {key} to talk")
+                } else {
+                    format!("READY — press {key} to talk")
+                },
+                SLATE,
+            ),
+            (RunState::Listening, _, _) if s.comparing => ("COMPARING".to_string(), AMBER),
+            (RunState::Listening, _, _) if s.speaking => ("SPEAKING".to_string(), BLUE),
+            (RunState::Listening, _, _) => ("LISTENING".to_string(), GREEN),
+        };
+
+        egui::Frame::new()
+            .fill(fill)
+            .corner_radius(8)
+            .inner_margin(14)
+            .show(ui, |ui| {
+                ui.set_width(ui.available_width());
+                ui.label(
+                    RichText::new(text)
+                        .size(34.0)
+                        .strong()
+                        .color(Color32::WHITE),
+                );
+            });
     }
 
     /// Persist a changed selection. A failure is shown, not swallowed: the
@@ -348,6 +600,10 @@ impl App {
     fn settings_panel(&mut self, ui: &mut egui::Ui) {
         ui.heading("Settings");
         ui.add_space(6.0);
+
+        self.mode_controls(ui);
+        ui.add_space(8.0);
+        ui.separator();
 
         let editable = !self.running();
         let mut changed = false;
@@ -666,12 +922,20 @@ impl App {
     }
 
     fn captions(&self, ui: &mut egui::Ui) {
+        self.indicator(ui);
+        ui.add_space(8.0);
+
         if self.session.lines.is_empty() {
+            let key = self.turn_key.name();
+            let hint = match (&self.session.state, self.session.mode) {
+                (RunState::Listening, Some(ModeKind::Turn)) => {
+                    format!("Take a turn with {key}, speak, and the captions appear here.")
+                }
+                (RunState::Listening, _) => "Speak, and captions appear here.".to_string(),
+                _ => "Press Start.".to_string(),
+            };
             ui.centered_and_justified(|ui| {
-                ui.weak(match self.session.state {
-                    RunState::Listening => "Listening. Speak, and captions appear here.",
-                    _ => "Press Start, then speak.",
-                });
+                ui.weak(hint);
             });
             return;
         }
@@ -714,6 +978,16 @@ impl eframe::App for App {
     }
 
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+        // Before any widget: the turn key is ours, and no button may also
+        // take it as a click (SPEC §8). It is consumed whatever state the
+        // window is in, so a press meant as a turn never lands on the focused
+        // button instead.
+        let key = self.turn_key;
+        let (edges, focused) = ui
+            .ctx()
+            .input_mut(|input| (take_turn_key(input, key), input.focused));
+        self.handle_turn_key(edges, focused);
+
         egui::Panel::top("top").show(ui, |ui| {
             ui.add_space(6.0);
             self.top_bar(ui);
@@ -913,9 +1187,9 @@ mod tests {
     #[test]
     fn a_caption_keeps_the_languages_it_was_spoken_in() {
         let mut s = Session::default();
-        s.begin("en", "es", false);
+        s.begin("en", "es", false, true);
         s.apply(final_msg(1, "Hello."));
-        s.begin("es", "en", false);
+        s.begin("es", "en", false, true);
         s.apply(final_msg(2, "Hola."));
 
         let Line::Caption(first) = &s.lines[0] else {
@@ -948,6 +1222,133 @@ mod tests {
                 speech_ms: 2182
             }
         ));
+    }
+
+    fn key_event(key: egui::Key, pressed: bool, repeat: bool) -> egui::Event {
+        egui::Event::Key {
+            key,
+            physical_key: None,
+            pressed,
+            repeat,
+            modifiers: egui::Modifiers::NONE,
+        }
+    }
+
+    #[test]
+    fn the_turn_key_never_reaches_a_focused_widget() {
+        // What a focused button checks, and what it must not find.
+        let mut input = egui::InputState::default();
+        input.events.push(key_event(egui::Key::Space, true, false));
+        input.events.push(egui::Event::Text(" ".to_string()));
+        input.keys_down.insert(egui::Key::Space);
+        assert!(input.key_pressed(egui::Key::Space));
+
+        let edges = take_turn_key(&mut input, egui::Key::Space);
+
+        assert!(edges.pressed);
+        assert!(
+            !input.key_pressed(egui::Key::Space),
+            "a button would see Space"
+        );
+        assert!(input.events.is_empty(), "a space would be typed");
+        assert!(!input.keys_down.contains(&egui::Key::Space));
+    }
+
+    #[test]
+    fn other_keys_are_left_for_the_widgets() {
+        let mut input = egui::InputState::default();
+        input.events.push(key_event(egui::Key::Enter, true, false));
+        input.events.push(key_event(egui::Key::Tab, true, false));
+        take_turn_key(&mut input, egui::Key::Space);
+        assert!(input.key_pressed(egui::Key::Enter));
+        assert!(input.key_pressed(egui::Key::Tab));
+    }
+
+    #[test]
+    fn a_held_key_is_one_press_not_many() {
+        let mut input = egui::InputState::default();
+        input.events.push(key_event(egui::Key::Space, true, true));
+        input.events.push(key_event(egui::Key::Space, true, true));
+        let edges = take_turn_key(&mut input, egui::Key::Space);
+        assert!(!edges.pressed, "key-repeat is not a new press");
+
+        let mut input = egui::InputState::default();
+        input.events.push(key_event(egui::Key::Space, false, false));
+        assert!(take_turn_key(&mut input, egui::Key::Space).released);
+    }
+
+    #[test]
+    fn a_turn_goes_ready_recording_processing_ready() {
+        let mut s = Session::default();
+        s.begin("es", "en", false, true);
+        s.apply(PipelineMsg::Listening);
+        s.apply(PipelineMsg::Mode(ModeKind::Turn));
+        assert_eq!(s.turn, TurnState::Idle);
+
+        s.apply(PipelineMsg::TurnStarted);
+        assert_eq!(s.turn, TurnState::Recording);
+        s.apply(PipelineMsg::Level(-20.0));
+
+        s.apply(PipelineMsg::TurnEnded);
+        assert_eq!(s.turn, TurnState::Processing);
+        assert!(s.level_db.is_none(), "the microphone is closed");
+
+        s.apply(final_msg(1, "Hola."));
+        s.apply(PipelineMsg::Translated {
+            index: 1,
+            target: "Hello.".to_string(),
+            translate_ms: 300,
+        });
+        assert_eq!(
+            s.turn,
+            TurnState::Processing,
+            "the reply has not been spoken yet"
+        );
+        s.apply(PipelineMsg::SpeakingStarted {
+            index: 1,
+            first_audio_ms: 900,
+        });
+        s.apply(PipelineMsg::SpeakingEnded);
+        assert_eq!(s.turn, TurnState::Idle);
+    }
+
+    #[test]
+    fn a_silent_turn_or_a_failure_ends_processing() {
+        for ending in [
+            PipelineMsg::NothingRecognized {
+                index: 1,
+                speech_ms: 2000,
+            },
+            PipelineMsg::NotTranslated {
+                index: 1,
+                reason: "echo".to_string(),
+            },
+            PipelineMsg::Error("synthesis failed".to_string()),
+        ] {
+            let mut s = Session::default();
+            s.begin("es", "en", false, true);
+            s.apply(PipelineMsg::Mode(ModeKind::Turn));
+            s.apply(PipelineMsg::TurnStarted);
+            s.apply(PipelineMsg::TurnEnded);
+            s.apply(ending);
+            assert_eq!(s.turn, TurnState::Idle);
+        }
+    }
+
+    #[test]
+    fn without_speech_a_translation_ends_the_turn() {
+        let mut s = Session::default();
+        s.begin("es", "en", false, false);
+        s.apply(PipelineMsg::Mode(ModeKind::Turn));
+        s.apply(PipelineMsg::TurnStarted);
+        s.apply(PipelineMsg::TurnEnded);
+        s.apply(final_msg(1, "Hola."));
+        s.apply(PipelineMsg::Translated {
+            index: 1,
+            target: "Hello.".to_string(),
+            translate_ms: 300,
+        });
+        assert_eq!(s.turn, TurnState::Idle);
     }
 
     #[test]

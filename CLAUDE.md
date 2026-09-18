@@ -81,7 +81,15 @@ Milestones 0–5 complete.
   it. What the messages do to the window lives in `gui::Session`, which has no egui in it
   and is unit-tested. No arguments opens the window; the M0 table is `--report`.
 
-Next is M6: modes and the turn key.
+- M6: continuous and turn-based modes, switchable while running, and the turn key in toggle
+  and hold styles. In turn mode the microphone device is closed between turns, not merely
+  ignored; a turn is one utterance, trimmed of silence by the VAD and split at pauses only
+  past 25 s (Whisper hears 30 s). Taking a turn stops any reply mid-word and holds replies
+  that arrive during it, so the half-duplex gate never eats a turn. The turn key is removed
+  from the frame's input before any widget runs (`gui::take_turn_key`). `--listen` is
+  always continuous: a terminal has no turn key.
+
+Next is M7: paired mode.
 
 ## What the translation stage refuses
 

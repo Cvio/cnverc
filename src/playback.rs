@@ -12,6 +12,12 @@
 //!
 //! The 150 ms tail is for the speaker and the room: the sound card is still
 //! emptying its own buffer when our queue runs dry.
+//!
+//! In turn-based mode (SPEC §8) the user decides when the microphone is live,
+//! and that decision wins. Taking a turn stops any reply mid-word and holds
+//! whatever arrives during the turn until it ends, through a
+//! [`PlaybackControl`]. Otherwise a reply playing into the gate would throw
+//! away the start of the very turn the user just asked for.
 
 use std::collections::VecDeque;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -89,6 +95,13 @@ impl Gate {
         );
         self.speaking.store(false, Ordering::Release);
     }
+
+    /// Open at once, with no tail: a reply has been cut short because the user
+    /// took a turn, and nothing more is coming out of the speaker.
+    fn open_now(&self) {
+        self.open_at_ms.store(0, Ordering::Release);
+        self.speaking.store(false, Ordering::Release);
+    }
 }
 
 /// The queue the cpal output callback drains.
@@ -100,6 +113,8 @@ struct Queue {
 pub struct Player {
     queue: Arc<Mutex<Queue>>,
     gate: Arc<Gate>,
+    /// True during a user's turn: nothing plays, and anything queued waits.
+    hold: Arc<AtomicBool>,
     channels: usize,
     device_rate: u32,
     stop: Arc<AtomicBool>,
@@ -133,12 +148,14 @@ impl Player {
         let queue = Arc::new(Mutex::new(Queue {
             samples: VecDeque::new(),
         }));
+        let hold = Arc::new(AtomicBool::new(false));
         let stop = Arc::new(AtomicBool::new(false));
         let (ready_tx, ready_rx) = std::sync::mpsc::channel::<Result<(), String>>();
 
         let thread = {
             let queue = queue.clone();
             let gate = gate.clone();
+            let hold = hold.clone();
             let stop = stop.clone();
             let name = name.clone();
             std::thread::Builder::new()
@@ -151,6 +168,7 @@ impl Player {
                         sample_format,
                         queue,
                         gate,
+                        hold,
                         events,
                         stop,
                         ready_tx,
@@ -179,6 +197,7 @@ impl Player {
         Ok(Self {
             queue,
             gate,
+            hold,
             channels,
             device_rate,
             stop,
@@ -208,7 +227,11 @@ impl Player {
             resampler.resample(samples, true)
         };
 
-        self.gate.speaking_started();
+        // A reply that arrives during the user's turn waits, and must not
+        // close the gate on the turn's audio. It closes the gate when it plays.
+        if !self.hold.load(Ordering::Acquire) {
+            self.gate.speaking_started();
+        }
 
         let mut queue = self
             .queue
@@ -226,6 +249,51 @@ impl Player {
             }
         }
         Ok(())
+    }
+}
+
+impl Player {
+    /// A handle the pipeline thread keeps, to stop and hold playback when the
+    /// user takes a turn. The player itself stays with the thread that speaks.
+    pub fn control(&self) -> PlaybackControl {
+        PlaybackControl {
+            queue: self.queue.clone(),
+            gate: self.gate.clone(),
+            hold: self.hold.clone(),
+        }
+    }
+}
+
+/// What taking a turn does to playback (SPEC §8).
+#[derive(Clone)]
+pub struct PlaybackControl {
+    queue: Arc<Mutex<Queue>>,
+    gate: Arc<Gate>,
+    hold: Arc<AtomicBool>,
+}
+
+impl PlaybackControl {
+    /// The user is taking a turn: cut off any reply mid-word, open the gate at
+    /// once, and hold whatever arrives until the turn ends.
+    pub fn begin_turn(&self) {
+        self.hold.store(true, Ordering::Release);
+        if let Ok(mut queue) = self.queue.lock() {
+            queue.samples.clear();
+        }
+        self.gate.open_now();
+    }
+
+    /// The turn is over: play anything that arrived during it.
+    pub fn end_turn(&self) {
+        let waiting = self
+            .queue
+            .lock()
+            .map(|queue| !queue.samples.is_empty())
+            .unwrap_or(false);
+        if waiting {
+            self.gate.speaking_started();
+        }
+        self.hold.store(false, Ordering::Release);
     }
 }
 
@@ -270,17 +338,19 @@ fn player_thread(
     sample_format: SampleFormat,
     queue: Arc<Mutex<Queue>>,
     gate: Arc<Gate>,
+    hold: Arc<AtomicBool>,
     events: Option<Sender<PipelineMsg>>,
     stop: Arc<AtomicBool>,
     ready: std::sync::mpsc::Sender<Result<(), String>>,
 ) {
-    let stream = match build_output_stream(&device, &config, sample_format, queue.clone()) {
-        Ok(stream) => stream,
-        Err(e) => {
-            let _ = ready.send(Err(format!("cannot open output device \"{name}\": {e}")));
-            return;
-        }
-    };
+    let stream =
+        match build_output_stream(&device, &config, sample_format, queue.clone(), hold.clone()) {
+            Ok(stream) => stream,
+            Err(e) => {
+                let _ = ready.send(Err(format!("cannot open output device \"{name}\": {e}")));
+                return;
+            }
+        };
     if let Err(e) = stream.play() {
         let _ = ready.send(Err(format!("cannot start output device \"{name}\": {e}")));
         return;
@@ -291,6 +361,20 @@ fn player_thread(
     // callback keeps the realtime thread free of clocks and logging.
     let mut was_speaking = false;
     while !stop.load(Ordering::Relaxed) {
+        // During a turn nothing plays. A reply that was cut off has ended as
+        // far as anyone listening is concerned; the gate was already opened
+        // by begin_turn, so it is not touched here.
+        if hold.load(Ordering::Acquire) {
+            if was_speaking {
+                was_speaking = false;
+                if let Some(events) = &events {
+                    let _ = events.send(PipelineMsg::SpeakingEnded);
+                }
+            }
+            std::thread::sleep(POLL);
+            continue;
+        }
+
         let empty = match queue.lock() {
             Ok(queue) => queue.samples.is_empty(),
             Err(_) => {
@@ -326,15 +410,16 @@ fn build_output_stream(
     config: &StreamConfig,
     sample_format: SampleFormat,
     queue: Arc<Mutex<Queue>>,
+    hold: Arc<AtomicBool>,
 ) -> Result<cpal::Stream> {
     match sample_format {
-        SampleFormat::F32 => stream_of::<f32>(device, config, queue),
-        SampleFormat::I16 => stream_of::<i16>(device, config, queue),
-        SampleFormat::U16 => stream_of::<u16>(device, config, queue),
-        SampleFormat::I32 => stream_of::<i32>(device, config, queue),
-        SampleFormat::I8 => stream_of::<i8>(device, config, queue),
-        SampleFormat::U8 => stream_of::<u8>(device, config, queue),
-        SampleFormat::F64 => stream_of::<f64>(device, config, queue),
+        SampleFormat::F32 => stream_of::<f32>(device, config, queue, hold),
+        SampleFormat::I16 => stream_of::<i16>(device, config, queue, hold),
+        SampleFormat::U16 => stream_of::<u16>(device, config, queue, hold),
+        SampleFormat::I32 => stream_of::<i32>(device, config, queue, hold),
+        SampleFormat::I8 => stream_of::<i8>(device, config, queue, hold),
+        SampleFormat::U8 => stream_of::<u8>(device, config, queue, hold),
+        SampleFormat::F64 => stream_of::<f64>(device, config, queue, hold),
         other => Err(anyhow!("unsupported output sample format {other:?}")),
     }
 }
@@ -343,6 +428,7 @@ fn stream_of<T>(
     device: &Device,
     config: &StreamConfig,
     queue: Arc<Mutex<Queue>>,
+    hold: Arc<AtomicBool>,
 ) -> Result<cpal::Stream>
 where
     T: cpal::SizedSample + cpal::FromSample<f32>,
@@ -353,6 +439,13 @@ where
             move |data: &mut [T], _: &cpal::OutputCallbackInfo| {
                 // Realtime thread: a lock that is never held long, and silence
                 // if it is somehow unavailable. Never block, never allocate.
+                // Held for the user's turn: silence, and the queue waits.
+                if hold.load(Ordering::Relaxed) {
+                    for sample in data.iter_mut() {
+                        *sample = T::from_sample(0.0);
+                    }
+                    return;
+                }
                 let Ok(mut queue) = queue.try_lock() else {
                     for sample in data.iter_mut() {
                         *sample = T::from_sample(0.0);
@@ -497,6 +590,57 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn taking_a_turn_opens_the_gate_at_once() {
+        // A reply is playing; the user takes a turn. There is no tail to wait
+        // out, because the reply has stopped.
+        let gate = Gate::new(true);
+        gate.speaking_started();
+        assert!(gate.is_closed());
+        gate.open_now();
+        assert!(!gate.is_closed(), "the turn's first words would be lost");
+    }
+
+    #[test]
+    fn a_reply_held_through_a_turn_closes_the_gate_only_when_it_plays() {
+        let gate = Arc::new(Gate::new(true));
+        let control = PlaybackControl {
+            queue: Arc::new(Mutex::new(Queue {
+                samples: VecDeque::new(),
+            })),
+            gate: gate.clone(),
+            hold: Arc::new(AtomicBool::new(false)),
+        };
+
+        control.begin_turn();
+        // A reply arrives mid-turn and is queued, but held.
+        if let Ok(mut queue) = control.queue.lock() {
+            queue.samples.extend([0.1, 0.2, 0.3]);
+        }
+        assert!(!gate.is_closed(), "a held reply must not gate the turn");
+
+        control.end_turn();
+        assert!(
+            gate.is_closed(),
+            "the held reply now plays, and gates the mic"
+        );
+        assert!(!control.hold.load(Ordering::Acquire));
+    }
+
+    #[test]
+    fn taking_a_turn_cuts_off_the_reply_that_was_playing() {
+        let control = PlaybackControl {
+            queue: Arc::new(Mutex::new(Queue {
+                samples: VecDeque::from(vec![0.5; 480]),
+            })),
+            gate: Arc::new(Gate::new(true)),
+            hold: Arc::new(AtomicBool::new(false)),
+        };
+        control.begin_turn();
+        let empty = control.queue.lock().map(|q| q.samples.is_empty());
+        assert_eq!(empty.ok(), Some(true));
     }
 
     #[test]

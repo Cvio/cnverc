@@ -11,13 +11,22 @@ use std::time::{Duration, Instant};
 use anyhow::{anyhow, Result};
 use tracing::info;
 
-use crate::config::Config;
+use crate::config::{Config, ModeKind};
 use crate::pipeline::{Options, Pipeline, PipelineMsg};
 
 /// How often to check whether the time is up.
 const POLL: Duration = Duration::from_millis(100);
 
 pub fn run(root: &Path, config: &Config, seconds: Option<u64>, options: Options) -> Result<()> {
+    // A terminal has no turn key, so --listen always listens continuously.
+    // Taking turns needs the window (SPEC §8).
+    let mut config = config.clone();
+    if config.mode.kind == ModeKind::Turn {
+        info!("--listen listens continuously; turn-taking is in the window");
+        config.mode.kind = ModeKind::Continuous;
+    }
+    let config = &config;
+
     let (tx, rx) = channel();
     let pipeline = Pipeline::start(root.to_path_buf(), config.clone(), options, tx)?;
 

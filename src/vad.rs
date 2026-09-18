@@ -8,7 +8,15 @@
 //! In turn-based mode (Milestone 6) this same detector is used only to trim
 //! leading and trailing silence, not to decide boundaries. That is a question
 //! of who calls it, not of a different detector.
+//!
+//! One thing is added on top: a pre-roll. The detector reports a segment from
+//! the point where it became confident someone was speaking, and a soft onset
+//! comes before that point: the breath of "Hola", the "¿D" of "¿Dónde", a
+//! short quiet "No". Live sessions lost exactly those words, and a lost "No"
+//! reverses the meaning of what was said. So the audio just before each
+//! segment is kept and put back on the front of it.
 
+use std::collections::VecDeque;
 use std::path::{Path, PathBuf};
 
 use anyhow::{anyhow, Context, Result};
@@ -27,6 +35,12 @@ const BUFFER_SECONDS: f32 = 30.0;
 /// never pauses would otherwise grow an unbounded buffer and produce no
 /// transcript at all.
 const MAX_SPEECH_SECONDS: f32 = 20.0;
+
+/// Audio restored in front of each segment. Recordings from a live session
+/// began mid-word on "¿Dónde"; 300 ms covers a soft first syllable with room to
+/// spare, and extra lead-in costs a recognizer nothing but a little silence.
+const PRE_ROLL_MS: u64 = 300;
+const PRE_ROLL: u64 = PRE_ROLL_MS * SAMPLE_RATE as u64 / 1000;
 
 /// One complete utterance as the detector cut it.
 #[derive(Debug, Clone)]
@@ -65,6 +79,18 @@ pub struct Segmenter {
     vad: VoiceActivityDetector,
     /// Partial window carried between `push` calls.
     pending: Vec<f32>,
+    /// Recent audio exactly as the detector received it, so the lead-in of a
+    /// segment can be recovered after the detector reports it. It reaches back
+    /// past the longest segment plus the silence that ends it, because that is
+    /// how late a segment's start is learned.
+    history: VecDeque<f32>,
+    history_cap: usize,
+    /// Samples the detector has accepted since it was created or last reset.
+    /// Its segment offsets count in the same units.
+    fed: u64,
+    /// Where the previous segment ended. Pre-roll never reaches back past it,
+    /// so two segments cut close together cannot share audio.
+    last_end: u64,
 }
 
 impl Segmenter {
@@ -111,9 +137,19 @@ impl Segmenter {
             )
         })?;
 
+        let history_seconds = MAX_SPEECH_SECONDS as f64
+            + settings.min_silence_ms as f64 / 1000.0
+            + PRE_ROLL_MS as f64 / 1000.0
+            + 1.0;
+        let history_cap = (history_seconds * SAMPLE_RATE as f64) as usize;
+
         Ok(Self {
             vad,
             pending: Vec::with_capacity(WINDOW),
+            history: VecDeque::with_capacity(history_cap),
+            history_cap,
+            fed: 0,
+            last_end: 0,
         })
     }
 
@@ -123,8 +159,7 @@ impl Segmenter {
         for sample in pcm {
             self.pending.push(*sample);
             if self.pending.len() == WINDOW {
-                self.vad.accept_waveform(&self.pending);
-                self.pending.clear();
+                self.accept_pending();
             }
         }
         self.drain()
@@ -133,14 +168,33 @@ impl Segmenter {
     /// End of input: push out any utterance still being accumulated. Used when
     /// capture stops, and in turn-based mode when the user ends a turn.
     pub fn flush(&mut self) -> Vec<Segment> {
+        // Where captured audio ends, before any padding goes in.
+        let real_end = self.fed + self.pending.len() as u64;
         if !self.pending.is_empty() {
             // Pad the last partial window; the detector only accepts full ones.
             self.pending.resize(WINDOW, 0.0);
-            self.vad.accept_waveform(&self.pending);
-            self.pending.clear();
+            self.accept_pending();
         }
         self.vad.flush();
-        self.drain()
+
+        // A segment holds only audio that was captured, never the padding.
+        let mut segments = self.drain();
+        for segment in &mut segments {
+            let captured = real_end.saturating_sub(segment.start_sample) as usize;
+            segment.samples.truncate(captured);
+        }
+        segments.retain(|s| !s.samples.is_empty());
+        segments
+    }
+
+    /// Hand one full window to the detector, and remember it.
+    fn accept_pending(&mut self) {
+        self.vad.accept_waveform(&self.pending);
+        self.history.extend(self.pending.iter().copied());
+        self.fed += self.pending.len() as u64;
+        let excess = self.history.len().saturating_sub(self.history_cap);
+        self.history.drain(..excess);
+        self.pending.clear();
     }
 
     /// True while the detector believes someone is speaking. The pipeline sends
@@ -158,15 +212,36 @@ impl Segmenter {
         self.pending.clear();
         self.vad.clear();
         self.vad.reset();
+        // The detector counts from zero again after a reset, so its history
+        // and the offsets into it start over with it.
+        self.history.clear();
+        self.fed = 0;
+        self.last_end = 0;
     }
 
     fn drain(&mut self) -> Vec<Segment> {
         let mut segments = Vec::new();
         while let Some(front) = self.vad.front() {
-            let start = front.start();
+            let start = front.start().max(0) as u64;
+            let body = front.samples();
+
+            // How much lead-in to restore: the pre-roll, but never back past
+            // the previous segment, and never further than history reaches.
+            let oldest = self.fed - self.history.len() as u64;
+            let lead = PRE_ROLL
+                .min(start.saturating_sub(self.last_end))
+                .min(start.saturating_sub(oldest));
+
+            let from = (start - lead - oldest) as usize;
+            let to = (start - oldest) as usize;
+            let mut samples = Vec::with_capacity(lead as usize + body.len());
+            samples.extend(self.history.range(from..to));
+            samples.extend_from_slice(body);
+
+            self.last_end = start + body.len() as u64;
             segments.push(Segment {
-                start_sample: start.max(0) as u64,
-                samples: front.samples().to_vec(),
+                start_sample: start - lead,
+                samples,
             });
             drop(front);
             self.vad.pop();
@@ -277,49 +352,69 @@ mod tests {
         );
     }
 
-    /// Does the detector clip the start of speech?
+    /// The pre-roll must splice exactly: every segment, lead-in included, is
+    /// the audio at the position it claims, and no two segments share audio.
     ///
-    /// A VAD triggers slightly after speech actually begins, and the first
-    /// phoneme is the one that disappears. This measures the gap between the
-    /// first sample with real energy in a recording and the first sample the
-    /// detector hands back.
+    /// This replaces an earlier onset measurement that compared the first
+    /// sample above a fixed loudness threshold with the detector's start. A
+    /// soft onset like the "H" of "Hola" is quieter than any such threshold,
+    /// so it passed on exactly the recordings that were never at risk and said
+    /// nothing about the live ones that were.
+    ///
+    /// A long recording is the useful input here: many segments, some close
+    /// together, and history that has to be trimmed as it runs.
     ///
     /// ```bash
-    /// CONVERS_TEST_VAD_MODEL=/abs/silero_vad.onnx     /// CONVERS_TEST_WAV=/abs/speech.wav     /// cargo test --release -- --ignored --nocapture onset
+    /// CONVERS_TEST_VAD_MODEL=/abs/silero_vad.onnx \
+    /// CONVERS_TEST_WAV=/abs/speech.wav \
+    /// cargo test --release -- --ignored --nocapture pre_roll
     /// ```
     #[test]
     #[ignore = "needs the Silero model and a recording; see the doc comment"]
-    fn measure_onset_clipping() {
+    fn pre_roll_splices_exactly_and_never_overlaps() {
         let model = std::env::var("CONVERS_TEST_VAD_MODEL").expect("CONVERS_TEST_VAD_MODEL");
         let wav = std::env::var("CONVERS_TEST_WAV").expect("CONVERS_TEST_WAV");
         let audio = crate::wav::read_16k_mono(Path::new(&wav)).expect("read the test wav");
 
-        // First sample whose short-term energy clears the noise floor.
-        let window = SAMPLE_RATE as usize / 100; // 10 ms
-        let noise_floor = 0.01_f32;
-        let first_energy = audio
-            .chunks(window)
-            .position(|w| w.iter().any(|s| s.abs() > noise_floor))
-            .map(|i| i * window)
-            .unwrap_or(0);
-
         let mut segmenter = Segmenter::new(&settings(&model)).expect("load the VAD");
         let mut segments = Vec::new();
-        for chunk in audio.chunks(1024) {
+        // Device-sized chunks that do not divide the detector's window, so
+        // the carried-over partial window is exercised too.
+        for chunk in audio.chunks(700) {
             segments.extend(segmenter.push(chunk));
         }
         segments.extend(segmenter.flush());
         assert!(!segments.is_empty(), "no speech found");
 
-        let first_energy_ms = first_energy as u64 * 1000 / SAMPLE_RATE as u64;
-        let first_segment_ms = segments[0].start_ms();
+        let mut previous_end = 0u64;
+        for (i, segment) in segments.iter().enumerate() {
+            let start = segment.start_sample as usize;
+            let end = start + segment.samples.len();
+            assert!(
+                end <= audio.len(),
+                "segment {i} runs {} samples past the end of the recording",
+                end - audio.len()
+            );
+            assert!(
+                segment.samples[..] == audio[start..end],
+                "segment {i} at {} ms is not the audio it claims to be",
+                segment.start_ms()
+            );
+            assert!(
+                segment.start_sample >= previous_end,
+                "segment {i} starts at {} ms, inside the previous segment",
+                segment.start_ms()
+            );
+            previous_end = end as u64;
+        }
+
         println!(
-            "energy starts at {first_energy_ms} ms, the detector starts at {first_segment_ms} ms              (clipped {} ms)",
-            first_segment_ms.saturating_sub(first_energy_ms)
+            "{} segments, every one an exact slice of the recording, none overlapping",
+            segments.len()
         );
         for segment in segments.iter().take(5) {
             println!(
-                "  segment {:>6} ms .. {:>6} ms",
+                "  {:>6} ms .. {:>6} ms",
                 segment.start_ms(),
                 segment.end_ms()
             );

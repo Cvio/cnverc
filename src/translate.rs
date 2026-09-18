@@ -147,9 +147,9 @@ impl LlamaTranslator {
         let mut sampler = LlamaSampler::chain_simple([LlamaSampler::greedy()]);
         let mut decoder = encoding_rs::UTF_8.new_decoder();
         let mut out = String::new();
-        let mut position = batch.n_tokens();
 
-        for _ in 0..MAX_OUTPUT_TOKENS {
+        // Each generated token takes the next position after the prompt.
+        for position in (batch.n_tokens()..).take(MAX_OUTPUT_TOKENS) {
             let token = sampler.sample(&ctx, batch.n_tokens() - 1);
             sampler.accept(token);
             if self.model.is_eog_token(token) {
@@ -165,7 +165,6 @@ impl LlamaTranslator {
             batch
                 .add(token, position, &[0], true)
                 .map_err(|e| anyhow!("cannot extend the batch: {e}"))?;
-            position += 1;
             ctx.decode(&mut batch)
                 .map_err(|e| anyhow!("cannot generate: {e}"))?;
         }
@@ -241,7 +240,7 @@ fn system_prompt(source: &str, target: &str) -> String {
 /// Language names for the prompt. A code we do not know is passed through:
 /// the model recognises far more of them than this list, and inventing a
 /// hardcoded language table is not what this project is for (SPEC §1).
-fn language_name(code: &str) -> &str {
+pub fn language_name(code: &str) -> &str {
     match code {
         "es" => "Spanish",
         "en" => "English",

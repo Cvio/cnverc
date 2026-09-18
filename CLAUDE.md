@@ -59,7 +59,7 @@ loses. If you believe one of these is wrong, stop and say so rather than working
 
 ## Status
 
-Milestone 2 complete.
+Milestones 0–4 complete; Milestone 5 built, its check awaiting a person.
 
 - M0: skeleton, path resolution, config load, model discovery, report.
 - M1: cpal capture with device enumeration, resampling to 16 kHz mono at the capture
@@ -76,7 +76,12 @@ Milestone 2 complete.
   gate. The voice is chosen by language, not by a config key, because §7 defines no key for it
   and §9 says the language decides which voice speaks.
 
-Next is M5, the egui GUI.
+- M5: the egui window. The pipeline loop lives in `pipeline.rs` and reports only through
+  `PipelineMsg` (§11); `listen.rs` (the `--listen` CLI) and `gui.rs` are two consumers of
+  it. What the messages do to the window lives in `gui::Session`, which has no egui in it
+  and is unit-tested. No arguments opens the window; the M0 table is `--report`.
+
+Next is M6: modes and the turn key.
 
 ## What the translation stage refuses
 

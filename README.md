@@ -15,19 +15,27 @@ no uplink and no DNS anywhere.
 
 ## Status
 
-**Milestone 4 of 9.** Microphone to speakers: capture, Silero VAD, Parakeet or Whisper,
-translation with a GGUF model in process, and speech through a Piper voice — all offline. The
-user interface is still a log; the GUI is Milestone 5. Milestones are listed in `SPEC.md` §13
-and are built in order.
+**Milestone 5 of 9.** Microphone to speakers, with a window: capture, Silero VAD, Parakeet
+or Whisper, translation with a GGUF model in process, and speech through a Piper voice — all
+offline. Milestones are listed in `SPEC.md` §13 and are built in order.
+
+Double-click `convers.exe`, or run it with no arguments, and the window opens. Everything is
+set from there — recognizer, languages, microphone and output, speech, half-duplex, and the
+recognizer comparison — and choices are saved back to `convers.toml` with its comments left
+alone. The command line remains for shells, logs and scripted checks:
 
 ```bash
-convers                       # what models are installed
-convers --devices             # what microphones are available
-convers --listen              # listen and transcribe with the configured engine
+convers                       # open the window
+convers --report              # what models are installed
+convers --devices             # what microphones and outputs are available
+convers --listen              # listen, translate and speak, logging to the terminal
 convers --listen --wav        # also write each utterance to logs/segments/
-convers --listen --compare    # run every engine on each utterance, side by side
-convers --listen --seconds 20 # stop cleanly after 20 s
+convers --listen --compare    # run every recognizer on each utterance, side by side
+convers --listen --seconds 20 # stop cleanly after 20 s of listening
 ```
+
+A console window opens alongside the main one for now, carrying the log. Hiding it is a
+packaging decision for Milestone 9.
 
 ### On the translation model's size
 

@@ -170,6 +170,77 @@ impl Config {
             }
         }
     }
+    /// Write back the selections the window can change, leaving everything
+    /// else in the file as the user wrote it.
+    ///
+    /// The file is edited rather than regenerated: `convers.toml` is meant to
+    /// be read and hand-edited (SPEC §7), and a save that stripped its comments
+    /// or reordered it would punish the person who did.
+    pub fn save_selections(&self, path: &Path) -> Result<()> {
+        let existing = match std::fs::read_to_string(path) {
+            Ok(text) => text,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => String::new(),
+            Err(e) => {
+                return Err(
+                    anyhow::Error::new(e).context(format!("failed to read {}", path.display()))
+                )
+            }
+        };
+        // A file that does not parse is not overwritten: whatever is wrong with
+        // it is the user's to see, not convers' to erase.
+        let mut doc: toml_edit::DocumentMut = existing
+            .parse()
+            .with_context(|| format!("failed to parse {}; not overwriting it", path.display()))?;
+
+        set(&mut doc, "asr", "engine", self.asr.engine.as_str());
+        set(
+            &mut doc,
+            "languages",
+            "source",
+            self.languages.source.as_str(),
+        );
+        set(
+            &mut doc,
+            "languages",
+            "target",
+            self.languages.target.as_str(),
+        );
+        set(
+            &mut doc,
+            "audio",
+            "input_device",
+            self.audio.input_device.as_str(),
+        );
+        set(
+            &mut doc,
+            "audio",
+            "output_device",
+            self.audio.output_device.as_str(),
+        );
+        set(&mut doc, "tts", "enabled", self.tts.enabled);
+        set(&mut doc, "tts", "half_duplex", self.tts.half_duplex);
+
+        std::fs::write(path, doc.to_string())
+            .with_context(|| format!("failed to write {}", path.display()))
+    }
+}
+
+/// Set one key, keeping any comment that sat beside the old value.
+fn set(
+    doc: &mut toml_edit::DocumentMut,
+    table: &str,
+    key: &str,
+    value: impl Into<toml_edit::Value>,
+) {
+    let mut value = value.into();
+    if let Some(old) = doc
+        .get(table)
+        .and_then(|t| t.get(key))
+        .and_then(|item| item.as_value())
+    {
+        *value.decor_mut() = old.decor().clone();
+    }
+    doc[table][key] = toml_edit::Item::Value(value);
 }
 
 #[cfg(test)]
@@ -229,6 +300,49 @@ discovery = true
         assert_eq!(config.languages.target, "en");
         assert_eq!(config.mode.turn_key, "Space");
         assert!(config.asr.engine.is_empty());
+    }
+
+    #[test]
+    fn saving_selections_keeps_comments_and_every_other_key() {
+        let path = std::env::temp_dir().join(format!("convers-save-{}.toml", std::process::id()));
+        let original = "# my notes about this rig\n\
+                        [asr]\n\
+                        engine = \"parakeet\"   # the fast one\n\
+                        \n\
+                        [vad]\n\
+                        threshold = 0.35\n\
+                        min_silence_ms = 500\n\
+                        min_speech_ms = 250\n";
+        std::fs::write(&path, original).expect("write");
+
+        let (mut config, _) = Config::load(&path).expect("load");
+        config.asr.engine = "whisper-large-v3-turbo".to_string();
+        config.audio.output_device = "Speakers".to_string();
+        config.save_selections(&path).expect("save");
+
+        let saved = std::fs::read_to_string(&path).expect("read back");
+        let _ = std::fs::remove_file(&path);
+
+        assert!(saved.contains("# my notes about this rig"), "{saved}");
+        assert!(saved.contains("# the fast one"), "{saved}");
+        assert!(
+            saved.contains("engine = \"whisper-large-v3-turbo\""),
+            "{saved}"
+        );
+        let reloaded: Config = toml::from_str(&saved).expect("the saved file must parse");
+        assert_eq!(reloaded.audio.output_device, "Speakers");
+        assert_eq!(reloaded.vad.threshold, 0.35, "an untouched key changed");
+    }
+
+    #[test]
+    fn a_malformed_file_is_never_overwritten() {
+        let path = std::env::temp_dir().join(format!("convers-bad-{}.toml", std::process::id()));
+        std::fs::write(&path, "[asr\nengine = ").expect("write");
+        let result = Config::default().save_selections(&path);
+        let after = std::fs::read_to_string(&path).expect("read back");
+        let _ = std::fs::remove_file(&path);
+        assert!(result.is_err());
+        assert_eq!(after, "[asr\nengine = ", "the broken file was replaced");
     }
 
     #[test]

@@ -6,9 +6,11 @@ use anyhow::{anyhow, Result};
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum Command {
+    /// Open the window. What a double-click from Explorer does.
+    Gui,
     /// Print the model discovery table and exit (Milestone 0).
     Report,
-    /// List audio input devices and exit.
+    /// List audio devices and exit.
     Devices,
     /// Capture from the microphone, transcribe, and log the result.
     Listen {
@@ -29,8 +31,9 @@ USAGE:
     convers [COMMAND]
 
 COMMANDS:
-    (none)              Print the discovered models and exit
-    --devices           List audio input devices and exit
+    (none)              Open the window
+    --report            Print the discovered models and exit
+    --devices           List audio input and output devices and exit
     --listen            Capture from the microphone and transcribe
 
 OPTIONS FOR --listen:
@@ -48,11 +51,12 @@ executable; see README.md for what to put there.
 pub fn parse<I: IntoIterator<Item = String>>(args: I) -> Result<Command> {
     let mut args = args.into_iter();
     let Some(first) = args.next() else {
-        return Ok(Command::Report);
+        return Ok(Command::Gui);
     };
 
     match first.as_str() {
         "-h" | "--help" => Ok(Command::Help),
+        "--report" => reject_extra(args).map(|()| Command::Report),
         "--devices" => reject_extra(args).map(|()| Command::Devices),
         "--listen" => {
             let mut seconds = None;
@@ -105,8 +109,10 @@ mod tests {
     }
 
     #[test]
-    fn no_arguments_is_the_report() {
-        assert_eq!(parse_args(&[]).unwrap(), Command::Report);
+    fn no_arguments_opens_the_window() {
+        // A double-click from Explorer passes no arguments.
+        assert_eq!(parse_args(&[]).unwrap(), Command::Gui);
+        assert_eq!(parse_args(&["--report"]).unwrap(), Command::Report);
     }
 
     #[test]

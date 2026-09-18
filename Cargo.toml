@@ -2,7 +2,7 @@
 name = "convers"
 version = "0.1.0"
 edition = "2021"
-rust-version = "1.75"
+rust-version = "1.95"
 description = "Offline speech-to-speech translation. No internet, no services, no toolchain."
 publish = false
 
@@ -22,6 +22,8 @@ hound = "3.5.1"
 # (SPEC §2.6). llama.cpp has its own threadpool and does not need it.
 llama-cpp-2 = { version = "0.1.156", default-features = false, features = ["common"] }
 encoding_rs = "0.8.35"
+toml_edit = "0.22"
+eframe = "0.36"
 
 [profile.release]
 opt-level = 3

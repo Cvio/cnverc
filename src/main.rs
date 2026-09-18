@@ -1,17 +1,19 @@
 //! `convers` — offline speech-to-speech translation.
 //!
-//! Milestones so far: model discovery (M0), microphone capture through voice
-//! activity detection (M1), segment ASR with the dual-run comparison harness
-//! (M2), translation (M3), and speech with the half-duplex gate (M4).
+//! Started with no arguments, as a double-click from Explorer does, it opens
+//! the window. The command-line flags remain for shells, logs and the
+//! milestone checks that were written against them.
 
 mod asr;
 mod audio;
 mod cli;
 mod compare;
 mod config;
+mod gui;
 mod listen;
 mod models;
 mod paths;
+mod pipeline;
 mod playback;
 mod report;
 mod ring;
@@ -65,13 +67,17 @@ fn main() -> Result<()> {
         );
     }
 
-    if let cli::Command::Listen {
-        seconds,
-        write_wav,
-        compare,
-    } = command
-    {
-        return listen::run(&root, &config, seconds, write_wav, compare);
+    match command {
+        cli::Command::Gui => return gui::run(root, config),
+        cli::Command::Listen {
+            seconds,
+            write_wav,
+            compare,
+        } => {
+            let options = pipeline::Options { write_wav, compare };
+            return listen::run(&root, &config, seconds, options);
+        }
+        cli::Command::Report | cli::Command::Devices | cli::Command::Help => {}
     }
 
     let models_root = paths::models_dir(&root);

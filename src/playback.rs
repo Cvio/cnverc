@@ -15,6 +15,7 @@
 
 use std::collections::VecDeque;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::mpsc::Sender;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -22,6 +23,8 @@ use anyhow::{anyhow, Context, Result};
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{Device, SampleFormat, StreamConfig};
 use sherpa_onnx::LinearResampler;
+
+use crate::pipeline::PipelineMsg;
 use tracing::{debug, error, info, warn};
 
 /// How long after the last sample the microphone stays shut (SPEC §10).
@@ -109,7 +112,14 @@ impl Player {
     /// Like capture, the stream is built on its own thread because cpal
     /// streams are `!Send`, and any failure to open the device is reported
     /// back here rather than vanishing into that thread.
-    pub fn open(device_name: &str, gate: Arc<Gate>) -> Result<Self> {
+    ///
+    /// `events`, when given, hears [`PipelineMsg::SpeakingEnded`] each time the
+    /// queue drains.
+    pub fn open(
+        device_name: &str,
+        gate: Arc<Gate>,
+        events: Option<Sender<PipelineMsg>>,
+    ) -> Result<Self> {
         let device = select_output_device(device_name)?;
         let name = device.name().unwrap_or_else(|_| "<unnamed>".to_string());
         let supported = device
@@ -141,6 +151,7 @@ impl Player {
                         sample_format,
                         queue,
                         gate,
+                        events,
                         stop,
                         ready_tx,
                     )
@@ -259,6 +270,7 @@ fn player_thread(
     sample_format: SampleFormat,
     queue: Arc<Mutex<Queue>>,
     gate: Arc<Gate>,
+    events: Option<Sender<PipelineMsg>>,
     stop: Arc<AtomicBool>,
     ready: std::sync::mpsc::Sender<Result<(), String>>,
 ) {
@@ -296,6 +308,9 @@ fn player_thread(
                 "speaking ended; the microphone reopens in {} ms",
                 TAIL.as_millis()
             );
+            if let Some(events) = &events {
+                let _ = events.send(PipelineMsg::SpeakingEnded);
+            }
         }
 
         std::thread::sleep(POLL);
@@ -437,7 +452,7 @@ mod tests {
 
         for gate_enabled in [false, true] {
             let gate = Arc::new(Gate::new(gate_enabled));
-            let player = Player::open(&out_device, gate.clone()).expect("open playback");
+            let player = Player::open(&out_device, gate.clone(), None).expect("open playback");
             let (tx, rx) = sync_channel::<Vec<f32>>(64);
             let capture = audio::spawn_capture(&in_device, tx).expect("open capture");
             let mut segmenter = Segmenter::new(&vad_settings).expect("load the VAD");

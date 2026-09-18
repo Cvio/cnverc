@@ -143,6 +143,12 @@ impl Segmenter {
         self.drain()
     }
 
+    /// True while the detector believes someone is speaking. The pipeline sends
+    /// `SpeechStarted` on its rising edge (SPEC §11).
+    pub fn speech_in_progress(&self) -> bool {
+        self.vad.detected()
+    }
+
     /// Forget all state and any queued segments.
     ///
     /// The half-duplex gate (SPEC §10) holds the detector reset while TTS is

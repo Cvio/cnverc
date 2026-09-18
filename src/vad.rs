@@ -36,10 +36,14 @@ const BUFFER_SECONDS: f32 = 30.0;
 /// transcript at all.
 const MAX_SPEECH_SECONDS: f32 = 20.0;
 
-/// Audio restored in front of each segment. Recordings from a live session
-/// began mid-word on "¿Dónde"; 300 ms covers a soft first syllable with room to
-/// spare, and extra lead-in costs a recognizer nothing but a little silence.
-const PRE_ROLL_MS: u64 = 300;
+/// Audio restored in front of each segment. Recordings from live sessions
+/// began mid-word on "¿Dónde", which 300 ms fixed. It did not fix "¿Cuántos
+/// años tienes?": said quickly and softly before a pause, the whole of
+/// "¿Cuántos" came more than 300 ms before the detector triggered on "años",
+/// and the recording still began mid-word. 600 ms reaches it. Extra lead-in
+/// costs a recognizer nothing but a little silence (Whisper pads to 30 s
+/// regardless), and it never reaches back into the previous utterance.
+const PRE_ROLL_MS: u64 = 600;
 const PRE_ROLL: u64 = PRE_ROLL_MS * SAMPLE_RATE as u64 / 1000;
 
 /// One complete utterance as the detector cut it.
@@ -489,11 +493,15 @@ mod tests {
         // Now stop in the middle of an utterance after the reset, as ending a
         // session mid-sentence does. flush() must hand back the part that was
         // spoken, exactly, ending where the audio stopped.
+        // Cut near the end of a longer utterance, where speech has certainly
+        // begun. Halfway is not safe: with the pre-roll, the first part of a
+        // segment is lead-in the detector has not heard as speech yet, and
+        // stopping there rightly returns nothing.
         let target = segments
             .iter()
-            .find(|s| s.start_sample >= gated as u64)
-            .expect("an utterance after the reset");
-        let cut = target.start_sample as usize + target.samples.len() / 2;
+            .find(|s| s.start_sample >= gated as u64 && s.duration_ms() >= 1500)
+            .expect("an utterance of at least 1.5 s after the reset");
+        let cut = target.start_sample as usize + target.samples.len() - SAMPLE_RATE as usize / 5;
 
         let mut segmenter = Segmenter::new(&settings(&model)).expect("load the VAD");
         for chunk in audio[..first].chunks(700) {

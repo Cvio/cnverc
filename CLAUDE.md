@@ -59,7 +59,7 @@ loses. If you believe one of these is wrong, stop and say so rather than working
 
 ## Status
 
-Milestones 0–4 complete; Milestone 5 built, its check awaiting a person.
+Milestones 0–5 complete.
 
 - M0: skeleton, path resolution, config load, model discovery, report.
 - M1: cpal capture with device enumeration, resampling to 16 kHz mono at the capture

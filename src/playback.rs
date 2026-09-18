@@ -467,7 +467,9 @@ mod tests {
                 match rx.recv_timeout(Duration::from_millis(100)) {
                     Ok(chunk) => {
                         if gate.is_closed() {
-                            segmenter.reset();
+                            // Only the count of utterances matters here,
+                            // not where they sit on the timeline.
+                            segmenter.reset(0);
                             continue;
                         }
                         heard += segmenter.push(&chunk).len();

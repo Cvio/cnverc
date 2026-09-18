@@ -88,6 +88,11 @@ pub enum PipelineMsg {
         target: String,
         translate_ms: u128,
     },
+    /// Speech the VAD cut, in which the recognizer found no words. Usually a
+    /// cough or a chair; sometimes two seconds of real speech the recognizer
+    /// failed on. Shown either way, because the second must never pass
+    /// unnoticed.
+    NothingRecognized { index: usize, speech_ms: u64 },
     /// An utterance that was recognised but will not be translated or spoken,
     /// and why. Shown rather than silently dropped.
     NotTranslated { index: usize, reason: String },
@@ -293,6 +298,9 @@ fn run(
     let mut event_level = LevelMeter::new(LEVEL_EVENT);
     let mut was_gated = false;
     let mut hearing_speech = false;
+    // Every sample captured, fed or gated, so the detector can be told where
+    // the capture is when it is reset.
+    let mut captured: u64 = 0;
 
     let stage = Stage {
         selected_name: &selected_name,
@@ -313,7 +321,8 @@ fn run(
                         debug!("microphone gated while speaking");
                         was_gated = true;
                     }
-                    segmenter.reset();
+                    captured += chunk.len() as u64;
+                    segmenter.reset(captured);
                     hearing_speech = false;
                     continue;
                 }
@@ -332,6 +341,7 @@ fn run(
                         &mut comparison_engines,
                     );
                 }
+                captured += chunk.len() as u64;
 
                 // A segment engine emits SpeechStarted, then one Final
                 // (SPEC §11). The rising edge is what matters.
@@ -529,15 +539,21 @@ impl Stage<'_> {
         if let Some(asr) = selected {
             let began = Instant::now();
             match asr.transcribe(&utterance.pcm, self.language) {
-                // A recognizer finding no words is normal: the VAD cuts on
-                // energy, so a cough or a chair passes its threshold. Say so
-                // quietly rather than emitting an empty transcript that every
-                // later stage would have to special-case.
-                Ok(text) if text.trim().is_empty() => debug!(
-                    "  no words in {} ms of audio ({} ms to decide)",
-                    utterance.duration_ms(),
-                    began.elapsed().as_millis()
-                ),
+                // No words: usually a cough, sometimes real speech the
+                // recognizer failed on. Neither is sent to the translator, and
+                // both are reported, because a failed utterance that vanishes
+                // silently looks exactly like one that was never spoken.
+                Ok(text) if text.trim().is_empty() => {
+                    info!(
+                        "  no words recognised in {} ms of audio ({} ms to decide)",
+                        utterance.duration_ms(),
+                        began.elapsed().as_millis()
+                    );
+                    let _ = self.events.send(PipelineMsg::NothingRecognized {
+                        index: utterance.index,
+                        speech_ms: utterance.duration_ms(),
+                    });
+                }
                 // The segment duration travels with the timing, always:
                 // Whisper pads to 30 s internally (SPEC §10).
                 Ok(text) => {

@@ -91,6 +91,11 @@ pub struct Segmenter {
     /// Where the previous segment ended. Pre-roll never reaches back past it,
     /// so two segments cut close together cannot share audio.
     last_end: u64,
+    /// Capture position of the first sample fed since the last reset. The
+    /// detector counts from zero after every reset; adding this puts each
+    /// segment back on the capture's own timeline, so timestamps keep rising
+    /// across the half-duplex gate instead of starting over after every reply.
+    origin: u64,
 }
 
 impl Segmenter {
@@ -150,6 +155,7 @@ impl Segmenter {
             history_cap,
             fed: 0,
             last_end: 0,
+            origin: 0,
         })
     }
 
@@ -168,8 +174,9 @@ impl Segmenter {
     /// End of input: push out any utterance still being accumulated. Used when
     /// capture stops, and in turn-based mode when the user ends a turn.
     pub fn flush(&mut self) -> Vec<Segment> {
-        // Where captured audio ends, before any padding goes in.
-        let real_end = self.fed + self.pending.len() as u64;
+        // Where captured audio ends, before any padding goes in, on the same
+        // capture timeline as the segments.
+        let real_end = self.origin + self.fed + self.pending.len() as u64;
         if !self.pending.is_empty() {
             // Pad the last partial window; the detector only accepts full ones.
             self.pending.resize(WINDOW, 0.0);
@@ -203,12 +210,13 @@ impl Segmenter {
         self.vad.detected()
     }
 
-    /// Forget all state and any queued segments.
+    /// Forget all state and any queued segments. `origin` is the capture
+    /// position of the next sample that will be fed.
     ///
     /// The half-duplex gate (SPEC §10) holds the detector reset while TTS is
     /// speaking, so no fragment of our own voice can survive into the next
     /// utterance.
-    pub fn reset(&mut self) {
+    pub fn reset(&mut self, origin: u64) {
         self.pending.clear();
         self.vad.clear();
         self.vad.reset();
@@ -217,6 +225,7 @@ impl Segmenter {
         self.history.clear();
         self.fed = 0;
         self.last_end = 0;
+        self.origin = origin;
     }
 
     fn drain(&mut self) -> Vec<Segment> {
@@ -240,7 +249,7 @@ impl Segmenter {
 
             self.last_end = start + body.len() as u64;
             segments.push(Segment {
-                start_sample: start - lead,
+                start_sample: self.origin + start - lead,
                 samples,
             });
             drop(front);
@@ -419,6 +428,104 @@ mod tests {
                 segment.end_ms()
             );
         }
+    }
+
+    /// Segments after a reset still sit on the capture's timeline. The gate
+    /// discards audio and resets the detector; what comes after must be
+    /// timestamped where it really happened, not from zero.
+    ///
+    /// ```bash
+    /// CONVERS_TEST_VAD_MODEL=/abs/silero_vad.onnx \
+    /// CONVERS_TEST_WAV=/abs/speech.wav \
+    /// cargo test --release -- --ignored --nocapture timeline
+    /// ```
+    #[test]
+    #[ignore = "needs the Silero model and a recording; see the doc comment"]
+    fn a_reset_keeps_segments_on_the_capture_timeline() {
+        let model = std::env::var("CONVERS_TEST_VAD_MODEL").expect("CONVERS_TEST_VAD_MODEL");
+        let wav = std::env::var("CONVERS_TEST_WAV").expect("CONVERS_TEST_WAV");
+        let audio = crate::wav::read_16k_mono(Path::new(&wav)).expect("read the test wav");
+
+        // Feed a third, discard a second of audio as the gate would, feed
+        // the rest.
+        let first = audio.len() / 3;
+        let gated = first + SAMPLE_RATE as usize;
+        assert!(
+            gated < audio.len(),
+            "the recording is too short for this test"
+        );
+
+        let mut segmenter = Segmenter::new(&settings(&model)).expect("load the VAD");
+        let mut segments = Vec::new();
+        for chunk in audio[..first].chunks(700) {
+            segments.extend(segmenter.push(chunk));
+        }
+        segmenter.reset(gated as u64);
+        for chunk in audio[gated..].chunks(700) {
+            segments.extend(segmenter.push(chunk));
+        }
+        segments.extend(segmenter.flush());
+
+        let after: Vec<_> = segments
+            .iter()
+            .filter(|s| s.start_sample >= gated as u64)
+            .collect();
+        assert!(!after.is_empty(), "no speech after the reset");
+        for segment in after {
+            let start = segment.start_sample as usize;
+            let end = start + segment.samples.len();
+            assert!(
+                segment.samples[..] == audio[start..end],
+                "a segment after the reset is not the audio at {} ms",
+                segment.start_ms()
+            );
+        }
+        let starts: Vec<u64> = segments.iter().map(|s| s.start_sample).collect();
+        assert!(
+            starts.windows(2).all(|w| w[0] < w[1]),
+            "timestamps went backwards across the reset: {starts:?}"
+        );
+
+        // Now stop in the middle of an utterance after the reset, as ending a
+        // session mid-sentence does. flush() must hand back the part that was
+        // spoken, exactly, ending where the audio stopped.
+        let target = segments
+            .iter()
+            .find(|s| s.start_sample >= gated as u64)
+            .expect("an utterance after the reset");
+        let cut = target.start_sample as usize + target.samples.len() / 2;
+
+        let mut segmenter = Segmenter::new(&settings(&model)).expect("load the VAD");
+        for chunk in audio[..first].chunks(700) {
+            segmenter.push(chunk);
+        }
+        segmenter.reset(gated as u64);
+        let mut tail = Vec::new();
+        for chunk in audio[gated..cut].chunks(700) {
+            tail.extend(segmenter.push(chunk));
+        }
+        tail.extend(segmenter.flush());
+        let last = tail
+            .last()
+            .expect("stopping mid-utterance after a reset lost the utterance");
+        let (start, end) = (
+            last.start_sample as usize,
+            last.start_sample as usize + last.samples.len(),
+        );
+        assert_eq!(
+            end, cut,
+            "the flushed utterance does not end where the audio stopped"
+        );
+        assert!(
+            last.samples[..] == audio[start..end],
+            "the flushed utterance is not the audio"
+        );
+
+        println!(
+            "{} segments, timestamps rising across the reset; a mid-utterance stop keeps {} ms",
+            segments.len(),
+            last.duration_ms()
+        );
     }
 
     /// End-to-end against the real model and a real recording. Both paths come

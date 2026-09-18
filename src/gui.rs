@@ -69,6 +69,10 @@ pub enum RunState {
 #[derive(Debug, Clone, Default)]
 pub struct Caption {
     pub index: usize,
+    /// The languages this utterance was spoken and translated in. Kept on the
+    /// caption, because the settings may have changed since.
+    pub source_lang: String,
+    pub target_lang: String,
     pub source: String,
     pub target: Option<String>,
     /// Why there is no translation, when there is not going to be one.
@@ -84,6 +88,11 @@ pub struct Caption {
 pub enum Line {
     Caption(Caption),
     Comparison(Comparison),
+    /// Speech in which the recognizer found no words.
+    Nothing {
+        index: usize,
+        speech_ms: u64,
+    },
 }
 
 /// The window's state, as changed by pipeline messages.
@@ -94,6 +103,11 @@ pub struct Session {
     pub level_db: Option<f32>,
     pub lines: Vec<Line>,
     pub last_error: Option<String>,
+    /// The run's languages, stamped onto each caption as it arrives.
+    pub languages: (String, String),
+    /// Whether this run compares recognizers, which turns translation and
+    /// speech off. Said on screen, not only in a tooltip.
+    pub comparing: bool,
 }
 
 impl Default for Session {
@@ -104,11 +118,21 @@ impl Default for Session {
             level_db: None,
             lines: Vec::new(),
             last_error: None,
+            languages: (String::new(), String::new()),
+            comparing: false,
         }
     }
 }
 
 impl Session {
+    /// A run is starting with these settings.
+    pub fn begin(&mut self, source: &str, target: &str, comparing: bool) {
+        self.last_error = None;
+        self.languages = (source.to_string(), target.to_string());
+        self.comparing = comparing;
+        self.state = RunState::Starting("models".to_string());
+    }
+
     pub fn apply(&mut self, msg: PipelineMsg) {
         match msg {
             PipelineMsg::Loading(what) => self.state = RunState::Starting(what),
@@ -126,6 +150,8 @@ impl Session {
                 ..
             } => self.push(Line::Caption(Caption {
                 index,
+                source_lang: self.languages.0.clone(),
+                target_lang: self.languages.1.clone(),
                 source: text,
                 speech_ms,
                 asr_ms,
@@ -141,6 +167,9 @@ impl Session {
                     caption.target = Some(target);
                     caption.translate_ms = Some(translate_ms);
                 }
+            }
+            PipelineMsg::NothingRecognized { index, speech_ms } => {
+                self.push(Line::Nothing { index, speech_ms })
             }
             PipelineMsg::NotTranslated { index, reason } => {
                 if let Some(caption) = self.caption_mut(index) {
@@ -252,8 +281,11 @@ impl App {
     }
 
     fn start(&mut self) {
-        self.session.last_error = None;
-        self.session.state = RunState::Starting("models".to_string());
+        self.session.begin(
+            &self.config.languages.source,
+            &self.config.languages.target,
+            self.compare,
+        );
         let options = Options {
             write_wav: false,
             compare: self.compare,
@@ -333,9 +365,14 @@ impl App {
             ui.checkbox(&mut self.compare, "Compare recognizers")
                 .on_hover_text(
                     "Run every installed recognizer on each utterance and show the transcripts \
-                     side by side with their timings (SPEC §12). Translation and speech are off \
-                     while comparing.",
+                     side by side with their timings (SPEC §12).",
                 );
+            if self.compare {
+                ui.colored_label(
+                    Color32::from_rgb(220, 160, 40),
+                    "While comparing, nothing is translated or spoken.",
+                );
+            }
         });
 
         if !editable {
@@ -566,6 +603,10 @@ impl App {
                 RunState::Listening if self.session.speaking => {
                     RichText::new("Speaking").color(Color32::from_rgb(90, 160, 230))
                 }
+                RunState::Listening if self.session.comparing => {
+                    RichText::new("Comparing recognizers (no translation or speech)")
+                        .color(Color32::from_rgb(220, 160, 40))
+                }
                 RunState::Listening => {
                     RichText::new("Listening").color(Color32::from_rgb(90, 190, 110))
                 }
@@ -635,16 +676,19 @@ impl App {
             return;
         }
 
-        let source = self.config.languages.source.clone();
-        let target = self.config.languages.target.clone();
         egui::ScrollArea::vertical()
             .auto_shrink([false, false])
             .stick_to_bottom(true)
             .show(ui, |ui| {
                 for line in &self.session.lines {
                     match line {
-                        Line::Caption(c) => caption_card(ui, c, &source, &target),
+                        Line::Caption(c) => caption_card(ui, c),
                         Line::Comparison(c) => comparison_card(ui, c, &self.config.asr.engine),
+                        Line::Nothing { index, speech_ms } => {
+                            ui.weak(format!(
+                                "#{index} · nothing recognised in {speech_ms} ms of speech"
+                            ));
+                        }
                     }
                     ui.add_space(6.0);
                 }
@@ -702,7 +746,7 @@ fn describe_language(code: &str) -> String {
 
 /// One utterance: the translation large, the original beneath it, and the
 /// timings small. The translation is what the listener came for.
-fn caption_card(ui: &mut egui::Ui, c: &Caption, source: &str, target: &str) {
+fn caption_card(ui: &mut egui::Ui, c: &Caption) {
     egui::Frame::group(ui.style()).show(ui, |ui| {
         ui.set_width(ui.available_width());
         match (&c.target, &c.problem) {
@@ -721,8 +765,8 @@ fn caption_card(ui: &mut egui::Ui, c: &Caption, source: &str, target: &str) {
         }
         ui.label(RichText::new(&c.source).size(16.0).italics());
         let mut timing = format!(
-            "#{} · {source} → {target} · {} ms of speech · recognised {} ms",
-            c.index, c.speech_ms, c.asr_ms
+            "#{} · {} to {} · {} ms of speech · recognised {} ms",
+            c.index, c.source_lang, c.target_lang, c.speech_ms, c.asr_ms
         );
         if let Some(ms) = c.translate_ms {
             timing.push_str(&format!(" · translated {ms} ms"));
@@ -864,6 +908,46 @@ mod tests {
         assert!(s.last_error.is_some(), "a failed start must stay on screen");
         s.apply(PipelineMsg::Listening);
         assert!(s.last_error.is_none());
+    }
+
+    #[test]
+    fn a_caption_keeps_the_languages_it_was_spoken_in() {
+        let mut s = Session::default();
+        s.begin("en", "es", false);
+        s.apply(final_msg(1, "Hello."));
+        s.begin("es", "en", false);
+        s.apply(final_msg(2, "Hola."));
+
+        let Line::Caption(first) = &s.lines[0] else {
+            panic!("a caption")
+        };
+        let Line::Caption(second) = &s.lines[1] else {
+            panic!("a caption")
+        };
+        assert_eq!(
+            (first.source_lang.as_str(), first.target_lang.as_str()),
+            ("en", "es")
+        );
+        assert_eq!(
+            (second.source_lang.as_str(), second.target_lang.as_str()),
+            ("es", "en")
+        );
+    }
+
+    #[test]
+    fn speech_with_no_words_is_shown_not_hidden() {
+        let mut s = Session::default();
+        s.apply(PipelineMsg::NothingRecognized {
+            index: 4,
+            speech_ms: 2182,
+        });
+        assert!(matches!(
+            s.lines[0],
+            Line::Nothing {
+                index: 4,
+                speech_ms: 2182
+            }
+        ));
     }
 
     #[test]

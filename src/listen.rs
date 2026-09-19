@@ -25,6 +25,12 @@ pub fn run(root: &Path, config: &Config, seconds: Option<u64>, options: Options)
         info!("--listen listens continuously; turn-taking is in the window");
         config.mode.kind = ModeKind::Continuous;
     }
+    // Paired mode is in the window too: pairing needs a Connect button and a
+    // turn key, and a terminal has neither.
+    if config.peer.enabled {
+        info!("--listen does not pair; paired mode is in the window");
+        config.peer.enabled = false;
+    }
     let config = &config;
 
     let (tx, rx) = channel();

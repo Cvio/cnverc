@@ -241,6 +241,8 @@ impl Config {
         );
         set(&mut doc, "tts", "enabled", self.tts.enabled);
         set(&mut doc, "tts", "half_duplex", self.tts.half_duplex);
+        set(&mut doc, "peer", "enabled", self.peer.enabled);
+        set(&mut doc, "peer", "peer_addr", self.peer.peer_addr.as_str());
 
         std::fs::write(path, doc.to_string())
             .with_context(|| format!("failed to write {}", path.display()))

@@ -12,11 +12,17 @@
 //! indicator shows at a glance whether cnverc is ready, recording, or
 //! processing.
 //!
+//! Milestone 7 adds paired mode (SPEC §9): a peer panel showing this PC's
+//! addresses, a place to type the other PC's and connect, what discovery has
+//! found, the connection's state and why it failed, who holds the floor, and
+//! the headset warning when paired mode and continuous listening are both on.
+//!
 //! The window never talks to a model or a device. It starts a [`Pipeline`],
 //! reads [`PipelineMsg`]s (SPEC §11), and draws them. What the messages do to
 //! the window's state lives in [`Session`], which has no egui in it and is
 //! tested on its own.
 
+use std::net::IpAddr;
 use std::path::PathBuf;
 use std::sync::mpsc::{channel, Receiver, Sender};
 use std::time::Duration;
@@ -27,8 +33,11 @@ use eframe::egui::{self, Color32, RichText};
 use crate::audio::{self, InputDevice};
 use crate::compare::Comparison;
 use crate::config::{Config, ModeKind, TurnStyle};
+use crate::discovery::Found;
+use crate::floor::Holder;
 use crate::models::{self, AsrBackend, Backend, Engine, Entry, Role};
 use crate::paths;
+use crate::peer::{self, PeerState};
 use crate::pipeline::{self, Options, Pipeline, PipelineCmd, PipelineMsg};
 use crate::translate::language_name;
 use crate::tts;
@@ -100,6 +109,9 @@ pub enum RunState {
 pub enum TurnState {
     /// Waiting for the turn key. The microphone is closed.
     Idle,
+    /// Paired: the turn key was pressed and the other PC has not yet granted
+    /// the floor. The microphone is still closed.
+    Waiting,
     /// A turn is open. The microphone is live.
     Recording,
     /// The turn has ended and its words are being recognised, translated and
@@ -123,6 +135,8 @@ pub struct Caption {
     pub asr_ms: u128,
     pub translate_ms: Option<u128>,
     pub first_audio_ms: Option<u128>,
+    /// Paired: the PC it was sent to.
+    pub sent_to: Option<String>,
 }
 
 /// A line in the caption pane.
@@ -134,6 +148,14 @@ pub enum Line {
     Nothing {
         index: usize,
         speech_ms: u64,
+    },
+    /// Paired: an utterance from the other PC, in this PC's language.
+    Remote {
+        from: String,
+        lang: String,
+        text: String,
+        source_lang: String,
+        source_text: String,
     },
 }
 
@@ -155,6 +177,16 @@ pub struct Session {
     pub turn: TurnState,
     /// Whether replies are spoken, which decides when a turn is finished.
     pub speaks: bool,
+    /// Whether this run is paired with another PC (SPEC §9).
+    pub paired: bool,
+    /// The connection, once the peer thread has said.
+    pub peer: Option<PeerState>,
+    /// Who holds the floor, while connected.
+    pub floor: Option<Holder>,
+    /// Why the last turn asked for did not happen. Cleared by the next one.
+    pub floor_note: Option<String>,
+    /// Other cnverc PCs heard on the network.
+    pub discovered: Vec<Found>,
 }
 
 impl Default for Session {
@@ -170,18 +202,37 @@ impl Default for Session {
             mode: None,
             turn: TurnState::Idle,
             speaks: false,
+            paired: false,
+            peer: None,
+            floor: None,
+            floor_note: None,
+            discovered: Vec::new(),
         }
     }
 }
 
 impl Session {
     /// A run is starting with these settings.
-    pub fn begin(&mut self, source: &str, target: &str, comparing: bool, speaks: bool) {
+    pub fn begin(
+        &mut self,
+        source: &str,
+        target: &str,
+        comparing: bool,
+        speaks: bool,
+        paired: bool,
+    ) {
         self.last_error = None;
         self.languages = (source.to_string(), target.to_string());
         self.comparing = comparing;
-        // Comparing turns speech off, so a turn is finished without it.
-        self.speaks = speaks && !comparing;
+        // Comparing never pairs.
+        self.paired = paired && !comparing;
+        // Comparing turns speech off, so a turn is finished without it. Paired,
+        // this PC's translations are spoken by the other PC, not this one.
+        self.speaks = speaks && !comparing && !self.paired;
+        self.peer = None;
+        self.floor = None;
+        self.floor_note = None;
+        self.discovered.clear();
         self.mode = None;
         self.turn = TurnState::Idle;
         self.state = RunState::Starting("models".to_string());
@@ -205,7 +256,10 @@ impl Session {
                 self.mode = Some(mode);
                 self.turn = TurnState::Idle;
             }
-            PipelineMsg::TurnStarted => self.turn = TurnState::Recording,
+            PipelineMsg::TurnStarted => {
+                self.turn = TurnState::Recording;
+                self.floor_note = None;
+            }
             PipelineMsg::TurnEnded => {
                 self.turn = TurnState::Processing;
                 // The microphone is closed; a frozen meter would say otherwise.
@@ -258,12 +312,63 @@ impl Session {
                 ..
             } => {
                 self.speaking = true;
-                if let Some(caption) = self.caption_mut(index) {
+                if let Some(caption) = index.and_then(|i| self.caption_mut(i)) {
                     caption.first_audio_ms = Some(first_audio_ms);
                 }
             }
             PipelineMsg::SpeakingEnded => self.speaking = false,
             PipelineMsg::Comparison(comparison) => self.push(Line::Comparison(comparison)),
+            PipelineMsg::Remote {
+                from,
+                lang,
+                text,
+                source_lang,
+                source_text,
+            } => self.push(Line::Remote {
+                from,
+                lang,
+                text,
+                source_lang,
+                source_text,
+            }),
+            PipelineMsg::Sent { index, to } => {
+                if let Some(caption) = self.caption_mut(index) {
+                    caption.sent_to = Some(to);
+                }
+            }
+            PipelineMsg::NotSent { index, reason } => {
+                if let Some(caption) = self.caption_mut(index) {
+                    caption.problem = Some(format!("not sent: {reason}"));
+                }
+            }
+            PipelineMsg::Peer(state) => {
+                if !matches!(state, PeerState::Connected { .. }) {
+                    self.floor = None;
+                    if self.turn == TurnState::Waiting {
+                        self.turn = TurnState::Idle;
+                    }
+                }
+                self.peer = Some(state);
+            }
+            PipelineMsg::FloorChanged(holder) => {
+                match holder {
+                    Holder::Asking if self.turn == TurnState::Idle => {
+                        self.turn = TurnState::Waiting;
+                    }
+                    Holder::Free | Holder::Them(_) if self.turn == TurnState::Waiting => {
+                        self.turn = TurnState::Idle;
+                    }
+                    _ => {}
+                }
+                self.floor = Some(holder);
+            }
+            PipelineMsg::FloorRefused(why) => {
+                self.floor_note = Some(why);
+                if self.turn == TurnState::Waiting {
+                    self.turn = TurnState::Idle;
+                }
+            }
+            PipelineMsg::Discovered(found) => self.discovered = found,
             PipelineMsg::Error(e) => self.last_error = Some(e),
             PipelineMsg::Stopped => {
                 self.state = RunState::Stopped;
@@ -271,6 +376,9 @@ impl Session {
                 self.level_db = None;
                 self.mode = None;
                 self.turn = TurnState::Idle;
+                self.peer = None;
+                self.floor = None;
+                self.discovered.clear();
             }
         }
 
@@ -410,6 +518,10 @@ struct App {
     /// from the turn state, so a tap shorter than the pipeline's reply still
     /// ends the turn it began.
     holding: bool,
+    /// Paired mode: the other PC's address as typed, and this PC's own.
+    peer_input: String,
+    addresses: Vec<(String, IpAddr)>,
+    my_name: String,
 }
 
 impl App {
@@ -430,6 +542,9 @@ impl App {
             turn_key: egui::Key::Space,
             turn_key_state: TurnKey::default(),
             holding: false,
+            peer_input: config.peer.peer_addr.clone(),
+            addresses: Vec::new(),
+            my_name: String::new(),
             root,
             config,
         };
@@ -453,6 +568,8 @@ impl App {
         self.voices = pipeline::discovered_voices(&self.root);
         self.inputs = audio::list_input_devices().unwrap_or_default();
         self.outputs = audio::list_output_devices().unwrap_or_default();
+        self.addresses = peer::local_addresses();
+        self.my_name = peer::display_name(&self.config.peer.display_name);
     }
 
     fn running(&self) -> bool {
@@ -466,6 +583,7 @@ impl App {
             &self.config.languages.target,
             self.compare,
             self.config.tts.enabled,
+            self.config.peer.enabled,
         );
         let options = Options {
             write_wav: false,
@@ -503,7 +621,11 @@ impl App {
         match self.config.mode.turn_style {
             TurnStyle::Toggle => {
                 if edges.pressed {
-                    pipeline.send(if self.session.turn == TurnState::Recording {
+                    // Pressed again while still waiting for the floor cancels
+                    // the request.
+                    let open =
+                        matches!(self.session.turn, TurnState::Recording | TurnState::Waiting);
+                    pipeline.send(if open {
                         PipelineCmd::EndTurn
                     } else {
                         PipelineCmd::BeginTurn
@@ -566,6 +688,198 @@ impl App {
         }
     }
 
+    /// Paired mode (SPEC §9): this PC's addresses for the other person to
+    /// type, the other PC's address and a Connect button, what discovery has
+    /// found, and the state of the connection. Usable while running: pairing
+    /// happens after Start.
+    fn peer_panel(&mut self, ui: &mut egui::Ui) {
+        let editable = !self.running();
+        let toggled = ui
+            .add_enabled(
+                editable,
+                egui::Checkbox::new(&mut self.config.peer.enabled, "Pair with another PC"),
+            )
+            .on_hover_text(
+                "Two PCs, one conversation. Each translates what its own person says and \
+                 sends only the text; the other PC shows it and speaks it.",
+            )
+            .changed();
+        if toggled {
+            self.save();
+        }
+        if !self.config.peer.enabled {
+            return;
+        }
+
+        ui.indent("peer", |ui| {
+            let port = self
+                .config
+                .peer
+                .listen_addr
+                .trim()
+                .parse::<std::net::SocketAddr>()
+                .map(|a| a.port())
+                .unwrap_or(peer::DEFAULT_PORT);
+
+            ui.label(RichText::new(format!("This PC: {}", self.my_name)).strong());
+            if self.addresses.is_empty() {
+                ui.colored_label(
+                    Color32::from_rgb(220, 90, 70),
+                    "No network connection. Plug in a cable or join a network, then Rescan.",
+                );
+            }
+            for (interface, ip) in &self.addresses {
+                let shown = if port == peer::DEFAULT_PORT {
+                    ip.to_string()
+                } else {
+                    std::net::SocketAddr::new(*ip, port).to_string()
+                };
+                ui.horizontal_wrapped(|ui| {
+                    ui.monospace(shown);
+                    ui.weak(interface);
+                    if matches!(ip, IpAddr::V4(v4) if v4.is_link_local()) {
+                        ui.weak("(no router)");
+                    }
+                });
+            }
+            ui.weak("The other PC types one of these.");
+            ui.add_space(6.0);
+
+            let busy = matches!(
+                self.session.peer,
+                Some(PeerState::Connected { .. } | PeerState::Connecting(_))
+            );
+            ui.label("Other PC's address");
+            ui.horizontal(|ui| {
+                ui.add(
+                    egui::TextEdit::singleline(&mut self.peer_input)
+                        .hint_text("192.168.50.2")
+                        .desired_width(140.0),
+                );
+                if busy {
+                    if ui.button("Disconnect").clicked() {
+                        if let Some(pipeline) = &self.pipeline {
+                            pipeline.send(PipelineCmd::Disconnect);
+                        }
+                    }
+                } else if ui
+                    .add_enabled(self.can_connect(), egui::Button::new("Connect"))
+                    .clicked()
+                {
+                    self.connect();
+                }
+            });
+            if !self.running() {
+                ui.weak("Press Start on both PCs, then Connect on either one.");
+            }
+
+            if !busy && !self.session.discovered.is_empty() {
+                ui.add_space(4.0);
+                ui.label("Found on this network:");
+                for found in self.session.discovered.clone() {
+                    let label = format!("{} — {}", found.name, found.addr.ip());
+                    if ui
+                        .add_enabled(self.can_connect(), egui::Button::new(label))
+                        .clicked()
+                    {
+                        self.peer_input = if found.addr.port() == peer::DEFAULT_PORT {
+                            found.addr.ip().to_string()
+                        } else {
+                            found.addr.to_string()
+                        };
+                        self.connect();
+                    }
+                }
+            }
+
+            ui.add_space(4.0);
+            self.peer_status(ui);
+        });
+    }
+
+    /// Whether Connect can be pressed: running, and listening.
+    fn can_connect(&self) -> bool {
+        self.running()
+            && matches!(
+                self.session.peer,
+                Some(PeerState::Waiting { .. } | PeerState::Disconnected { .. })
+            )
+    }
+
+    fn connect(&mut self) {
+        match peer::parse_address(&self.peer_input) {
+            Ok(addr) => {
+                self.notice = None;
+                let typed = self.peer_input.trim().to_string();
+                if self.config.peer.peer_addr != typed {
+                    self.config.peer.peer_addr = typed;
+                    self.save();
+                }
+                if let Some(pipeline) = &self.pipeline {
+                    pipeline.send(PipelineCmd::Connect(addr));
+                }
+            }
+            Err(e) => self.notice = Some(format!("{e:#}")),
+        }
+    }
+
+    /// The connection, in words, and who holds the floor.
+    fn peer_status(&self, ui: &mut egui::Ui) {
+        const GOOD: Color32 = Color32::from_rgb(90, 190, 110);
+        const BAD: Color32 = Color32::from_rgb(220, 90, 70);
+        match &self.session.peer {
+            None if self.running() => {
+                ui.weak("Starting…");
+            }
+            None => {}
+            Some(PeerState::Waiting { port }) => {
+                ui.label(format!(
+                    "Listening on port {port}. Waiting for the other PC to connect, or connect \
+                     to it."
+                ));
+            }
+            Some(PeerState::Connecting(addr)) => {
+                ui.label(format!("Connecting to {addr}…"));
+            }
+            Some(PeerState::Connected {
+                name,
+                addr,
+                speaks,
+                sends,
+            }) => {
+                ui.colored_label(
+                    GOOD,
+                    RichText::new(format!("Paired with {name} ({})", addr.ip())).strong(),
+                );
+                ui.label(format!(
+                    "They speak {}; what they say arrives here in {}.",
+                    describe_language(speaks),
+                    describe_language(sends)
+                ));
+                if self.session.mode == Some(ModeKind::Turn) {
+                    let floor = match &self.session.floor {
+                        Some(Holder::Me) => "yours".to_string(),
+                        Some(Holder::Them(n)) => format!("{n}'s"),
+                        Some(Holder::Asking) => "asking…".to_string(),
+                        Some(Holder::Free) | None => "free".to_string(),
+                    };
+                    ui.label(format!("Floor: {floor}"));
+                }
+            }
+            Some(PeerState::Disconnected { reason, .. }) => {
+                ui.colored_label(BAD, RichText::new("Not connected").strong());
+                ui.colored_label(BAD, reason);
+            }
+            Some(PeerState::Unavailable(reason)) => {
+                ui.colored_label(BAD, RichText::new("Pairing is unavailable").strong());
+                ui.colored_label(BAD, reason);
+            }
+        }
+        if let Some(note) = &self.session.floor_note {
+            ui.colored_label(Color32::from_rgb(220, 160, 40), note);
+        }
+    }
+
     /// The indicator of SPEC §8: whether cnverc is ready, recording or
     /// processing, readable from across a desk. Colour and word both change,
     /// so neither has to be relied on alone.
@@ -577,9 +891,15 @@ impl App {
         const GREEN: Color32 = Color32::from_rgb(38, 130, 70);
         const BLUE: Color32 = Color32::from_rgb(40, 100, 170);
 
+        const PURPLE: Color32 = Color32::from_rgb(110, 60, 150);
+
         let key = self.turn_key.name();
         let hold = self.config.mode.turn_style == TurnStyle::Hold;
         let s = &self.session;
+        let them = match &s.floor {
+            Some(Holder::Them(name)) => Some(name.as_str()),
+            _ => None,
+        };
         let (text, fill) = match (&s.state, s.mode, s.turn) {
             (RunState::Stopped, ..) => ("STOPPED".to_string(), GREY),
             (RunState::Starting(_), ..) => ("LOADING…".to_string(), GREY),
@@ -599,6 +919,12 @@ impl App {
                 },
                 AMBER,
             ),
+            (RunState::Listening, Some(ModeKind::Turn), TurnState::Waiting) => {
+                ("ASKING FOR THE FLOOR…".to_string(), AMBER)
+            }
+            (RunState::Listening, Some(ModeKind::Turn), TurnState::Idle) if them.is_some() => {
+                (format!("{} IS TALKING", them.unwrap_or_default()), PURPLE)
+            }
             (RunState::Listening, Some(ModeKind::Turn), TurnState::Idle) => (
                 if hold {
                     format!("READY — hold {key} to talk")
@@ -667,6 +993,9 @@ impl App {
         ui.add_space(6.0);
 
         self.mode_controls(ui);
+        ui.add_space(8.0);
+        ui.separator();
+        self.peer_panel(ui);
         ui.add_space(8.0);
         ui.separator();
 
@@ -946,6 +1275,31 @@ impl App {
                 ))
                 .on_hover_text("Microphone level. Nothing moving here means nothing is heard.");
             }
+
+            // Paired or not, visible from anywhere in the window: a dropped
+            // connection must never look like a quiet one (SPEC §13, M7).
+            if self.session.paired && self.running() {
+                ui.add_space(12.0);
+                match &self.session.peer {
+                    Some(PeerState::Connected { name, .. }) => {
+                        ui.label(
+                            RichText::new(format!("Paired with {name}"))
+                                .size(16.0)
+                                .color(Color32::from_rgb(90, 190, 110)),
+                        );
+                    }
+                    Some(PeerState::Connecting(_)) => {
+                        ui.label(RichText::new("Connecting…").size(16.0));
+                    }
+                    _ => {
+                        ui.label(
+                            RichText::new("Not paired")
+                                .size(16.0)
+                                .color(Color32::from_rgb(220, 90, 70)),
+                        );
+                    }
+                }
+            }
         });
     }
 
@@ -987,6 +1341,29 @@ impl App {
     }
 
     fn captions(&self, ui: &mut egui::Ui) {
+        // Continuous and paired together: both microphones and both speakers
+        // are live, with no floor between them. Said for as long as it is
+        // true, not once (SPEC §9).
+        if self.session.paired && self.session.mode == Some(ModeKind::Continuous) {
+            egui::Frame::new()
+                .fill(Color32::from_rgb(150, 40, 30))
+                .corner_radius(8)
+                .inner_margin(10)
+                .show(ui, |ui| {
+                    ui.set_width(ui.available_width());
+                    ui.label(
+                        RichText::new(
+                            "Headsets required. Paired and listening continuously, both \
+                             microphones and both speakers are live: without headsets the two \
+                             PCs hear and translate each other in a loop. Take turns instead to \
+                             use speakers.",
+                        )
+                        .size(16.0)
+                        .color(Color32::WHITE),
+                    );
+                });
+            ui.add_space(6.0);
+        }
         self.indicator(ui);
         ui.add_space(8.0);
 
@@ -1018,6 +1395,13 @@ impl App {
                                 "#{index} · nothing recognised in {speech_ms} ms of speech"
                             ));
                         }
+                        Line::Remote {
+                            from,
+                            lang,
+                            text,
+                            source_lang,
+                            source_text,
+                        } => remote_card(ui, from, lang, text, source_lang, source_text),
                     }
                     ui.add_space(6.0);
                 }
@@ -1114,8 +1498,32 @@ fn caption_card(ui: &mut egui::Ui, c: &Caption) {
         if let Some(ms) = c.first_audio_ms {
             timing.push_str(&format!(" · first audio {ms} ms"));
         }
+        if let Some(to) = &c.sent_to {
+            timing.push_str(&format!(" · sent to {to}"));
+        }
         ui.small(timing);
     });
+}
+
+/// An utterance from the other PC: what they said, in this PC's language,
+/// large, and their own words beneath it. Tinted, so which side said what is
+/// clear at a glance.
+fn remote_card(
+    ui: &mut egui::Ui,
+    from: &str,
+    lang: &str,
+    text: &str,
+    source_lang: &str,
+    source_text: &str,
+) {
+    egui::Frame::group(ui.style())
+        .fill(Color32::from_rgba_unmultiplied(110, 60, 150, 40))
+        .show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            ui.label(RichText::new(text).size(22.0).strong());
+            ui.label(RichText::new(source_text).size(16.0).italics());
+            ui.small(format!("{from} · {source_lang} to {lang}"));
+        });
 }
 
 /// Every recognizer's transcript of one utterance, side by side (SPEC §12),
@@ -1182,7 +1590,7 @@ mod tests {
             translate_ms: 340,
         });
         s.apply(PipelineMsg::SpeakingStarted {
-            index: 1,
+            index: Some(1),
             first_audio_ms: 650,
         });
 
@@ -1229,7 +1637,7 @@ mod tests {
         assert_eq!(s.state, RunState::Listening);
         s.apply(PipelineMsg::Level(-20.0));
         s.apply(PipelineMsg::SpeakingStarted {
-            index: 9,
+            index: Some(9),
             first_audio_ms: 1,
         });
         s.apply(PipelineMsg::Stopped);
@@ -1253,9 +1661,9 @@ mod tests {
     #[test]
     fn a_caption_keeps_the_languages_it_was_spoken_in() {
         let mut s = Session::default();
-        s.begin("en", "es", false, true);
+        s.begin("en", "es", false, true, false);
         s.apply(final_msg(1, "Hello."));
-        s.begin("es", "en", false, true);
+        s.begin("es", "en", false, true, false);
         s.apply(final_msg(2, "Hola."));
 
         let Line::Caption(first) = &s.lines[0] else {
@@ -1418,7 +1826,7 @@ mod tests {
     #[test]
     fn a_turn_goes_ready_recording_processing_ready() {
         let mut s = Session::default();
-        s.begin("es", "en", false, true);
+        s.begin("es", "en", false, true, false);
         s.apply(PipelineMsg::Listening);
         s.apply(PipelineMsg::Mode(ModeKind::Turn));
         assert_eq!(s.turn, TurnState::Idle);
@@ -1443,7 +1851,7 @@ mod tests {
             "the reply has not been spoken yet"
         );
         s.apply(PipelineMsg::SpeakingStarted {
-            index: 1,
+            index: Some(1),
             first_audio_ms: 900,
         });
         s.apply(PipelineMsg::SpeakingEnded);
@@ -1464,7 +1872,7 @@ mod tests {
             PipelineMsg::Error("synthesis failed".to_string()),
         ] {
             let mut s = Session::default();
-            s.begin("es", "en", false, true);
+            s.begin("es", "en", false, true, false);
             s.apply(PipelineMsg::Mode(ModeKind::Turn));
             s.apply(PipelineMsg::TurnStarted);
             s.apply(PipelineMsg::TurnEnded);
@@ -1476,7 +1884,7 @@ mod tests {
     #[test]
     fn without_speech_a_translation_ends_the_turn() {
         let mut s = Session::default();
-        s.begin("es", "en", false, false);
+        s.begin("es", "en", false, false, false);
         s.apply(PipelineMsg::Mode(ModeKind::Turn));
         s.apply(PipelineMsg::TurnStarted);
         s.apply(PipelineMsg::TurnEnded);
@@ -1517,5 +1925,107 @@ mod tests {
             panic!("a caption")
         };
         assert_eq!(oldest.index, 25, "the oldest lines go first");
+    }
+
+    fn connected(name: &str) -> PipelineMsg {
+        PipelineMsg::Peer(PeerState::Connected {
+            name: name.to_string(),
+            addr: "192.168.50.2:47800".parse().expect("addr"),
+            speaks: "en".to_string(),
+            sends: "es".to_string(),
+        })
+    }
+
+    #[test]
+    fn a_paired_turn_waits_for_the_floor_then_runs_as_usual() {
+        let mut s = Session::default();
+        s.begin("es", "en", false, true, true);
+        assert!(
+            !s.speaks,
+            "paired, the other PC speaks this PC's translations"
+        );
+        s.apply(PipelineMsg::Listening);
+        s.apply(PipelineMsg::Mode(ModeKind::Turn));
+        s.apply(connected("laptop-b"));
+
+        s.apply(PipelineMsg::FloorChanged(Holder::Asking));
+        assert_eq!(s.turn, TurnState::Waiting, "the microphone is not open yet");
+
+        s.apply(PipelineMsg::FloorChanged(Holder::Me));
+        s.apply(PipelineMsg::TurnStarted);
+        assert_eq!(s.turn, TurnState::Recording);
+        s.apply(PipelineMsg::TurnEnded);
+        s.apply(final_msg(1, "¿Dónde está la estación?"));
+        s.apply(PipelineMsg::Translated {
+            index: 1,
+            target: "Where is the station?".to_string(),
+            translate_ms: 300,
+        });
+        assert_eq!(s.turn, TurnState::Idle, "nothing to speak here");
+        s.apply(PipelineMsg::Sent {
+            index: 1,
+            to: "laptop-b".to_string(),
+        });
+        let Line::Caption(c) = &s.lines[0] else {
+            panic!("a caption")
+        };
+        assert_eq!(c.sent_to.as_deref(), Some("laptop-b"));
+    }
+
+    #[test]
+    fn a_refused_turn_says_why_and_returns_to_ready() {
+        let mut s = Session::default();
+        s.begin("es", "en", false, true, true);
+        s.apply(PipelineMsg::Mode(ModeKind::Turn));
+        s.apply(connected("laptop-b"));
+        s.apply(PipelineMsg::FloorChanged(Holder::Asking));
+        s.apply(PipelineMsg::FloorChanged(Holder::Free));
+        s.apply(PipelineMsg::FloorRefused(
+            "laptop-b did not answer within 2 s".to_string(),
+        ));
+        assert_eq!(s.turn, TurnState::Idle);
+        assert!(s.floor_note.as_deref().unwrap_or("").contains("2 s"));
+    }
+
+    #[test]
+    fn a_dropped_connection_clears_the_floor_and_any_wait() {
+        let mut s = Session::default();
+        s.begin("es", "en", false, true, true);
+        s.apply(PipelineMsg::Mode(ModeKind::Turn));
+        s.apply(connected("laptop-b"));
+        s.apply(PipelineMsg::FloorChanged(Holder::Asking));
+        s.apply(PipelineMsg::Peer(PeerState::Disconnected {
+            port: 47800,
+            reason: "laptop-b went silent".to_string(),
+        }));
+        assert_eq!(s.turn, TurnState::Idle);
+        assert!(s.floor.is_none());
+        assert!(matches!(s.peer, Some(PeerState::Disconnected { .. })));
+    }
+
+    #[test]
+    fn what_the_other_pc_says_gets_its_own_line() {
+        let mut s = Session::default();
+        s.apply(PipelineMsg::Remote {
+            from: "laptop-b".to_string(),
+            lang: "es".to_string(),
+            text: "¿Dónde está la estación?".to_string(),
+            source_lang: "en".to_string(),
+            source_text: "Where is the station?".to_string(),
+        });
+        assert!(matches!(&s.lines[0], Line::Remote { from, .. } if from == "laptop-b"));
+        // Speaking it touches no local caption.
+        s.apply(PipelineMsg::SpeakingStarted {
+            index: None,
+            first_audio_ms: 400,
+        });
+        assert!(s.speaking);
+    }
+
+    #[test]
+    fn comparing_never_pairs() {
+        let mut s = Session::default();
+        s.begin("es", "en", true, true, true);
+        assert!(!s.paired);
     }
 }

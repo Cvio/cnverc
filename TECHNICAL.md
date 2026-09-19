@@ -7,7 +7,8 @@ is [SPEC.md](SPEC.md); the constraints every change must respect are restated in
 
 ## Status
 
-Milestones 0–6 of 9 are complete. Milestones are defined in `SPEC.md` §13 and built in order;
+Milestones 0–6 of 9 are complete, and Milestone 7 is built and waiting for its check on two
+real PCs. Milestones are defined in `SPEC.md` §13 and built in order;
 each one's check must pass before the next starts.
 
 | Milestone | What it added |
@@ -19,24 +20,31 @@ each one's check must pass before the next starts.
 | M4 | Synthesis through sherpa-onnx, playback through cpal, the half-duplex gate |
 | M5 | The egui window; the pipeline reports only through `PipelineMsg` |
 | M6 | Continuous and turn-based modes, switchable while running; the turn key in toggle and hold styles |
-| M7 | Paired mode (next) |
+| M7 | Paired mode: listener, dialler, `Hello`, `Utterance`, the floor token, the peer panel, the firewall diagnostic, the headset warning, discovery (check pending) |
 
 ## Architecture
 
 ```
-mic ─► capture ─► VAD ─► ASR ─► translate ─► TTS ─► playback ─► speakers
-       (cpal)   (Silero)  │     (llama.cpp)  (Piper)   (cpal)
+mic ─► capture ─► VAD ─► ASR ─► translate ─┬─► speak ─► playback ─► speakers
+       (cpal)   (Silero)  │     (llama.cpp) │   (Piper)   (cpal)
+                          │                 └─► peer ◄──► the other PC (text only)
                           └──────► PipelineMsg ──────► window / terminal
 ```
 
-Four threads, connected by bounded channels:
+Threads, connected by bounded channels:
 
 - **Capture** runs the cpal input callback. It resamples to 16 kHz mono once, at the capture
   boundary. Nothing downstream resamples again.
 - **Pipeline** (`pipeline.rs`) runs the VAD and ASR, and takes `PipelineCmd`s (mode changes,
   turn start and end).
-- **Translate** runs MT and TTS, so a slow token stream can't stall recognition.
+- **Translate** runs MT, so a slow token stream can't stall recognition. It hands each
+  translation to the speaker (solo) or to the peer (paired).
+- **Speak** runs TTS for everything this PC says: its own translations when solo, and the
+  other PC's utterances when paired. The voice is chosen per utterance by its language.
 - **Playback** runs the cpal output and the half-duplex `Gate`.
+- **Peer** (`peer.rs`), only when paired, owns the connection, the handshake and the floor.
+  It has helpers: an acceptor, one dialler per Connect, and a reader per connection. A stalled
+  or dead peer can't block capture, recognition or the window.
 
 The front ends, `gui.rs` (the window) and `listen.rs` (`--listen`), receive `PipelineMsg`
 only. What those messages do to the window lives in `gui::Session`, which contains no egui
@@ -54,8 +62,9 @@ Details worth knowing:
   (`gui::take_turn_key`), so Space never also presses a focused button. egui's `keys_down` is
   left alone, because egui uses it to mark auto-repeats. cnverc also keeps its own key state
   (`gui::TurnKey`), so a held key counts as one press.
-- **The voice is chosen by target language**, not by a config key: §7 defines none, and §9
-  says the language decides which voice speaks.
+- **The voice is chosen by language**, not by a config key: §7 defines none, and §9 says the
+  language decides which voice speaks. Solo, that is the target language. Paired, it is each
+  received utterance's own `lang`, never inferred.
 - **Recognition and translation each use 6 threads.**
 - The window renders with **DirectX 12** on Windows. The Vulkan backend logged loader errors
   at startup.
@@ -234,7 +243,60 @@ ffmpeg -i es.wav -ar 16000 -ac 1 es-16k.wav
 Logs are written to `logs/` next to the exe. `--listen --wav` also writes each utterance to
 `logs/segments/`, which is how a misheard sentence gets diagnosed.
 
-## Paired mode networking (Milestone 7)
+## Paired mode
 
-The networking notes (which cables and networks work, addressing, and the Windows firewall
-trap) are in the README's "Connecting two PCs" section, because §14 puts them there.
+Two cnverc instances as the two ends of one conversation (SPEC §9). How to use it, and the
+networking notes §14 requires, are in the README's "Talking between two PCs" section. This is
+how it works.
+
+**What crosses the wire.** Text only: `wire.rs` is newline-delimited JSON over TCP, exactly
+the messages in §9, so a connection can be faked with netcat. Each machine runs its whole
+pipeline; the sender's translation is the receiver's caption and speech. `Bye` may carry an
+optional `reason`, which is how a refused second connection learns why.
+
+**Untrusted input.** `wire::decode` refuses a line over 16 KiB, a line that is not UTF-8, and
+any message with an unknown `proto`, the last one shown on screen by name. Every string is
+bounded, too long is refused rather than truncated, control characters become spaces, and a
+language code must be letters and hyphens. Received text is only ever shown or spoken, and
+`source_text` is never translated again.
+
+**No names, only addresses.** The address field takes an IP address, with an optional port
+(47800 by default). A hostname would go to the system resolver, which can mean a public DNS
+server, so names are refused rather than looked up.
+
+**The floor** is `floor.rs`, a state machine with no sockets or clock, tested case by case:
+
+- The turn key sends `FloorRequest`. `Pipeline::send` routes `BeginTurn` to the peer thread
+  when paired, and the peer thread sends `BeginTurn` to the pipeline only when `FloorGrant`
+  arrives. The microphone never opens on a timeout: after 2 s the turn fails visibly.
+- Simultaneous requests go to the name that sorts first. Two PCs with the same name fall back
+  to their addresses, which both ends see the same way round.
+- The floor goes back after the turn's utterance has been sent. The translate thread sends
+  `ReleaseFloor` after handing the utterance to the peer thread, so the release follows it on
+  the wire. A turn with nothing recognised releases the floor at once.
+- A grant nobody is waiting for (cancelled, late or stale) is answered with `FloorRelease`, so
+  the two ends never disagree about who holds the floor.
+
+**Noticing a dead link.** A pulled cable sends nothing, not even a reset. Each end pings every
+2 s, and a reader that hears nothing for 6 s declares the link gone: the floor is
+force-released and both windows show the disconnected state.
+
+**One peer at a time.** A second connection from a different PC is sent `Bye` with the reason
+and refused. Two connections between the same pair, from both PCs pressing Connect at once,
+settle on the one with the lower dialling address; both ends compute the same answer.
+
+**The firewall diagnostic** (§10). A refused dial means nothing is listening. A dial that
+times out means packets are being dropped. That message names the Windows firewall and the
+network profile, and adds that this PC's own firewall is suspect too if its listener has
+never accepted a connection.
+
+**Discovery** (`discovery.rs`) is a UDP broadcast on 47801 to every local network's broadcast
+address, plus 255.255.255.255, every 2 s. Windows sends the all-networks broadcast out of one
+interface only, so the per-network addresses are what reach a second network card. It only
+fills a pick-list. Typing the address always works, and nothing depends on discovery.
+
+**Testing on one PC.** `peer.rs`'s tests run two or three peers over loopback: a handshake, an
+utterance each way, the floor, a refused second connection, simultaneous dials, a hand-typed
+netcat session, and a dropped connection. To try the window with two instances on one PC,
+give the second copy its own folder and a different `[peer].listen_addr` port. Only one of the
+two can use discovery, since only one program can hold UDP port 47801.

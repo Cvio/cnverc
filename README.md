@@ -27,7 +27,8 @@ Technical details, design notes and the development workflow are in
 ## Setting up on a new PC
 
 The setup has to be done on a PC **with** internet, because you download the tools and the
-models. The finished folder doesn't need internet. These steps are for Windows 10 or 11.
+models. The finished folder doesn't need internet. These steps are for Windows 10 or 11; for
+Linux, see [Setting up on Linux](#setting-up-on-linux) after them.
 
 Allow about an hour, most of it spent waiting for downloads and the first build.
 
@@ -39,9 +40,10 @@ default options. It also installs **Git Bash**, the terminal every command below
 ✅ **Check:** open the Start menu, type `Git Bash`, and open it. A black window with a `$`
 prompt appears.
 
-### Step 2: Install the Visual Studio Build Tools
+### Step 2: Install the C++ build tools and LLVM
 
-cnverc is written in Rust, and parts of it are compiled with Microsoft's C++ compiler.
+cnverc is written in Rust, and parts of it are compiled with Microsoft's C++ compiler. The
+translator's build also needs **LLVM**, which reads its C++ headers.
 
 1. Download **Build Tools for Visual Studio** from
    <https://visualstudio.microsoft.com/downloads/>. It's under "Tools for Visual Studio", and
@@ -49,8 +51,13 @@ cnverc is written in Rust, and parts of it are compiled with Microsoft's C++ com
 2. Run the installer. When it asks what to install, tick **Desktop development with C++**.
 3. In the list on the right, make sure **C++ CMake tools for Windows** is also ticked.
 4. Click **Install** and wait. It's several gigabytes.
+5. Download LLVM from <https://github.com/llvm/llvm-project/releases/latest>: the file named
+   `LLVM-<version>-win64.exe`. Run it, and when it asks, choose **Add LLVM to the system PATH
+   for all users**. Keep the default install folder, `C:\Program Files\LLVM`.
 
 Do this step before step 3: the Rust installer looks for these tools.
+
+✅ **Check:** the folder `C:\Program Files\LLVM\bin` exists and contains `libclang.dll`.
 
 ### Step 3: Install Rust
 
@@ -122,6 +129,13 @@ some libraries). Later builds are much faster.
 > again and rebuild. If your Build Tools are a different version, the `18` in that path will
 > be different; look inside `C:\Program Files (x86)\Microsoft Visual Studio\` to see which
 > number you have.
+
+> **If the build fails mentioning "libclang" or "clang":** LLVM from step 2 is missing, or
+> was installed somewhere else. Install it, or tell the build where it is, then rebuild:
+>
+> ```bash
+> export LIBCLANG_PATH="/c/Program Files/LLVM/bin"
+> ```
 
 ### Step 6: Download the models
 
@@ -210,6 +224,46 @@ Double-click `target/release/cnverc.exe` in File Explorer, or run it from Git Ba
 The first time it opens, choose your microphone and speakers in the window. Your choices are
 saved in `cnverc.toml`, next to the exe, so you only do this once.
 
+### Setting up on Linux
+
+The steps are the same as for Windows, with different tools. These are for Ubuntu or Debian;
+the package names on other distributions are similar. Linux support is new, so if a step
+fails, note exactly what it printed.
+
+1. **Install the tools** in a terminal:
+
+   ```bash
+   sudo apt install git curl build-essential cmake pkg-config libclang-dev libasound2-dev
+   ```
+
+   On Fedora the equivalent is
+   `sudo dnf install git curl gcc-c++ cmake pkgconf clang-devel alsa-lib-devel`.
+
+2. **Install Rust** with the command from <https://rustup.rs>, accepting the defaults, then
+   close the terminal and open a new one:
+
+   ```bash
+   curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+   ```
+
+3. **Get the code and build it**, as in steps 4 and 5 above. There is no `export PATH` line on
+   Linux; `cargo build --release` is enough.
+
+4. **Download the models** with exactly the commands in step 6. They work unchanged.
+
+5. **Check and run** as in steps 7 and 8. The program is `cnverc`, with no `.exe`:
+
+   ```bash
+   ./target/release/cnverc --report
+   ```
+
+   ```bash
+   ./target/release/cnverc
+   ```
+
+cnverc needs a desktop session to open its window. On Linux, the window lists microphones and
+speakers by their ALSA names; if you're unsure which to pick, "System default" is usually right.
+
 ---
 
 ## Using cnverc
@@ -228,6 +282,8 @@ On the left side of the window you choose:
 - **Speak translations:** untick this to see captions only, with no voice.
 - **Mute the microphone while speaking:** leave this on when using speakers, so cnverc doesn't
   hear its own voice and translate it again. Turn it off only if you're wearing headphones.
+- **Pair with another PC:** two people, two PCs, one conversation. See
+  [Talking between two PCs](#talking-between-two-pcs) below.
 
 A second black window opens behind the main one. It's the log, and you can ignore it.
 
@@ -290,40 +346,105 @@ downloaded separately and are never stored in the repository.
 
 ---
 
-## Connecting two PCs (paired mode, coming in Milestone 7)
+## Talking between two PCs
 
-Paired mode isn't built yet. These notes are here so you can plan the hardware.
+With paired mode, each person has their own PC, and each PC translates what its own person
+says. It sends the other PC **only the translated text**, which the other PC shows and says
+aloud in its own voice. No sound is sent, so even a slow or poor connection works, and neither
+PC ever needs the internet.
 
-Two machines each run their own complete pipeline. **Only text crosses the wire**, never audio
-and never models. Laptop A captures Spanish, transcribes and translates it locally, and sends
-the English text; laptop B displays it and speaks it in its own voice. An utterance costs a few
-hundred bytes, so even a terrible link works.
+### Setting it up
 
-Any transport that appears to the OS as an IP interface works, and the socket code is the same
-for all of them:
+1. **Set each PC's languages for its own person.** If Ana speaks Spanish and Ben speaks
+   English:
+   - Ana's PC: Speaker's language **Spanish**, Translate into **English**.
+   - Ben's PC: Speaker's language **English**, Translate into **Spanish**.
 
-| Transport | Works | Notes |
+   Each PC needs the voice for the language its person *hears*: Ana's needs the Spanish voice,
+   Ben's the English one.
+
+2. **Connect the two PCs to the same network.** Any of the options in the table below works,
+   including a plain Ethernet cable between them.
+
+3. **On both PCs,** tick **Pair with another PC** and press **Start**.
+
+   The first time, Windows asks whether to allow cnverc through the firewall. Tick **Private
+   networks** and click **Allow**. On Linux with a firewall turned on, allow cnverc's ports
+   once:
+
+   ```bash
+   sudo ufw allow 47800/tcp
+   ```
+
+   ```bash
+   sudo ufw allow 47801/udp
+   ```
+
+4. **Connect them.** Under **This PC**, each PC shows its name and address, like
+   `192.168.50.2`. On **either** PC, type the other PC's address into **Other PC's address**
+   and press **Connect**. If the other PC appears under **Found on this network**, you can
+   click it instead of typing.
+
+   ✅ **Check:** both PCs show **Paired with** and the other PC's name, at the top of the
+   window.
+
+### Talking
+
+- **Take turns** (the usual way): press **Space** to talk, as on one PC. Only one person can
+  talk at a time. Your banner shows **ASKING FOR THE FLOOR…** for a moment, then
+  **RECORDING**. The other PC shows your PC's name followed by **IS TALKING**, and its Space
+  key won't start a turn until you've finished. When you press Space again, your
+  words appear on the other PC in their language and are spoken there.
+
+  Because only the person talking has a live microphone, you can both use speakers.
+
+- **Listen continuously:** both microphones listen all the time. **Both people must wear
+  headsets**, or each PC hears the other's speakers and translates it back, round and round.
+  cnverc shows a red warning for as long as this combination is on.
+
+If the connection drops, for example because a cable is pulled, both PCs show **Not paired**
+within a few seconds, and whoever was talking loses the floor. Press **Connect** again once
+the connection is back.
+
+To change the name the other PC sees, set `display_name` under `[peer]` in `cnverc.toml`.
+
+### If it won't connect
+
+cnverc says what went wrong under **Not connected** in the pairing panel:
+
+- **"Nothing is listening at …"**: the other PC isn't ready. Check that it has **Pair with
+  another PC** ticked and **Start** pressed, and that the address was typed exactly.
+- **"No answer from … within 4 s"**: something between the PCs is silently dropping the
+  connection, almost always a firewall. See **Firewall** below.
+- **"There is no route to …"**: the PCs aren't on the same network, or the address is wrong.
+
+### Networks that work
+
+Any connection that gives each PC a network address works, and cnverc treats them all the
+same way:
+
+| Connection | Works | Notes |
 |---|---|---|
-| Unmanaged Ethernet switch | Yes | No uplink needed |
-| Router with the WAN unplugged | Yes | Gives you DHCP, which is convenient |
-| Ethernet cable laptop-to-laptop | Yes | No crossover cable needed |
-| Wi-Fi hotspot from one laptop | Yes | No upstream required |
-| Existing Wi-Fi LAN | Yes | Guest-network client isolation will block it |
-| Thunderbolt / USB4 networking | Yes | Virtual Ethernet adapter; fastest option |
-| USB bridge/transfer cable | Yes | Presents as a NIC to each side |
-| Two USB-C-to-Ethernet dongles | Yes | Ordinary cable between them |
+| Unmanaged Ethernet switch | Yes | No router or internet needed |
+| Router with its internet cable unplugged | Yes | Hands out addresses automatically, which is convenient |
+| Ethernet cable from one laptop to the other | Yes | Any ordinary cable |
+| Wi-Fi hotspot from one laptop | Yes | No internet needed |
+| Existing Wi-Fi network | Yes | A guest network usually stops devices seeing each other |
+| Thunderbolt / USB4 networking | Yes | The fastest option |
+| USB bridge or transfer cable | Yes | Appears as a network adapter on each side |
+| Two USB-C-to-Ethernet adapters | Yes | Ordinary cable between them |
 | **Plain USB-C cable between two laptops** | **No** | Both ends are USB hosts; there is no network |
 
-**Addressing.** A dumb switch or a direct cable means no DHCP, so Windows falls back to
-link-local addressing (169.254.x.x) after about thirty seconds. That works, but the addresses
-are ugly and can change between sessions. For a rig you use repeatedly, set static IPs on that
-interface once, for example 192.168.50.1 and 192.168.50.2.
+**Addresses.** With a plain cable or a switch, there's no router to hand out addresses, so
+after about thirty seconds Windows picks one starting `169.254.`. cnverc marks these "(no
+router)". They work, but they can change each time. If you use the same two PCs often, give
+that network adapter a fixed address on each, for example `192.168.50.1` and `192.168.50.2`.
 
-**Firewall.** A network Windows can't identify is often classified as **Public**, which blocks
-inbound connections: the listener binds, the peer connects to nothing, and no useful error
-appears. Set that interface's network profile to Private. From Milestone 7, cnverc detects the
-bound-but-never-accepted state and says so specifically, rather than showing a generic
-timeout.
+**Firewall.** Windows often calls a network it can't identify, like a plain cable or a switch
+with no router, **Public**, and blocks incoming connections on it. cnverc can listen, but
+nothing reaches it, and the other PC just waits. cnverc recognises this and says so. The fix is
+on the PC that isn't being reached: open **Settings › Network & internet**, choose that
+network's adapter, and set **Network profile type** to **Private**.
 
 ---
 

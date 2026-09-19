@@ -9,10 +9,13 @@ mod audio;
 mod cli;
 mod compare;
 mod config;
+mod discovery;
+mod floor;
 mod gui;
 mod listen;
 mod models;
 mod paths;
+mod peer;
 mod pipeline;
 mod playback;
 mod report;
@@ -21,6 +24,7 @@ mod translate;
 mod tts;
 mod vad;
 mod wav;
+mod wire;
 
 use std::path::Path;
 

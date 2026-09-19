@@ -59,7 +59,7 @@ loses. If you believe one of these is wrong, stop and say so rather than working
 
 ## Status
 
-Milestones 0–5 complete.
+Milestones 0–6 complete. M7 is built; its check on two real PCs is pending.
 
 - M0: skeleton, path resolution, config load, model discovery, report.
 - M1: cpal capture with device enumeration, resampling to 16 kHz mono at the capture
@@ -89,7 +89,18 @@ Milestones 0–5 complete.
   from the frame's input before any widget runs (`gui::take_turn_key`). `--listen` is
   always continuous: a terminal has no turn key.
 
-Next is M7: paired mode.
+- M7 (built, check pending): paired mode. `wire.rs` is the §9 protocol and treats every
+  inbound line as untrusted; `floor.rs` is the floor token as a pure state machine; `peer.rs`
+  owns the connection on its own threads; `discovery.rs` is the UDP pick-list. In paired
+  mode `Pipeline::send` routes the turn key to the peer thread, which opens the microphone
+  only on `FloorGrant`. Translations go to the other PC instead of the local voice, and a
+  separate speaker thread speaks what arrives, choosing the voice by each utterance's `lang`.
+  Addresses are IP only: a typed hostname is refused, never resolved, because resolving could
+  reach a public DNS server. A dead link is noticed by pings stopping, not by TCP.
+
+The check for M7 needs the second PC (the user's is Linux, which §3 calls a nice-to-have):
+two machines on an isolated switch, a turn-based Spanish/English conversation, the uplink
+unplugged changing nothing, and a pulled cable force-releasing the floor on both ends.
 
 ## What the translation stage refuses
 

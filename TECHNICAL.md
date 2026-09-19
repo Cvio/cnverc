@@ -236,35 +236,5 @@ Logs are written to `logs/` next to the exe. `--listen --wav` also writes each u
 
 ## Paired mode networking (Milestone 7)
 
-Two machines each run their own complete pipeline. **Only text crosses the wire**, never audio
-and never models. Laptop A captures Spanish, transcribes and translates it locally, and sends
-the English text; laptop B displays it and speaks it in its own voice. An utterance costs a few
-hundred bytes, so even a terrible link works.
-
-Any transport that appears to the OS as an IP interface works, and the socket code is the same
-for all of them:
-
-| Transport | Works | Notes |
-|---|---|---|
-| Unmanaged Ethernet switch | Yes | No uplink needed |
-| Router with the WAN unplugged | Yes | Gives you DHCP, which is convenient |
-| Ethernet cable laptop-to-laptop | Yes | No crossover cable needed |
-| Wi-Fi hotspot from one laptop | Yes | No upstream required |
-| Existing Wi-Fi LAN | Yes | Guest-network client isolation will block it |
-| Thunderbolt / USB4 networking | Yes | Virtual Ethernet adapter; fastest option |
-| USB bridge/transfer cable | Yes | Presents as a NIC to each side |
-| Two USB-C-to-Ethernet dongles | Yes | Ordinary cable between them |
-| **Plain USB-C cable between two laptops** | **No** | Both ends are USB hosts; there is no network |
-
-**Addressing.** A dumb switch or a direct cable means no DHCP, so Windows falls back to
-link-local addressing (169.254.x.x) after about thirty seconds. That works, but the addresses
-are ugly and can change between sessions. For a rig you use repeatedly, set static IPs on that
-interface once, for example 192.168.50.1 and 192.168.50.2.
-
-**Firewall.** A network Windows can't identify is often classified as **Public**, which blocks
-inbound connections: the listener binds, the peer connects to nothing, and no useful error
-appears. Set that interface's network profile to Private. From Milestone 7, cnverc detects the
-bound-but-never-accepted state and says so specifically, rather than showing a generic
-timeout.
-
-When paired mode ships, its user-facing setup moves into the README.
+The networking notes (which cables and networks work, addressing, and the Windows firewall
+trap) are in the README's "Connecting two PCs" section, because §14 puts them there.

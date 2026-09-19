@@ -109,6 +109,15 @@ some libraries). Later builds are much faster.
 
 ✅ **Check:** the last line says `Finished`, and the file `target/release/cnverc.exe` exists.
 
+> **Building again without internet:** only the first build downloads anything: the speech
+> library, which it saves in `target/sherpa-onnx-prebuilt/`. If you ever delete `target/` and
+> need to rebuild with no internet, copy that folder somewhere safe first, then point the
+> build at the `lib` folder inside it before running `cargo build`:
+>
+> ```bash
+> export SHERPA_ONNX_LIB_DIR=/path/to/sherpa-onnx-v1.13.8-win-x64-static-MT-Release-lib/lib
+> ```
+
 > **If the build fails with "cmake not found" or similar:** run the `export PATH=...` line
 > again and rebuild. If your Build Tools are a different version, the `18` in that path will
 > be different; look inside `C:\Program Files (x86)\Microsoft Visual Studio\` to see which
@@ -279,4 +288,46 @@ downloaded separately and are never stored in the repository.
   `engine.toml` is missing, that model shows as disabled in the report, with the missing
   file's name.
 
-Model files come with their own licences; check each one before you redistribute it.
+---
+
+## Connecting two PCs (paired mode, coming in Milestone 7)
+
+Paired mode isn't built yet. These notes are here so you can plan the hardware.
+
+Two machines each run their own complete pipeline. **Only text crosses the wire**, never audio
+and never models. Laptop A captures Spanish, transcribes and translates it locally, and sends
+the English text; laptop B displays it and speaks it in its own voice. An utterance costs a few
+hundred bytes, so even a terrible link works.
+
+Any transport that appears to the OS as an IP interface works, and the socket code is the same
+for all of them:
+
+| Transport | Works | Notes |
+|---|---|---|
+| Unmanaged Ethernet switch | Yes | No uplink needed |
+| Router with the WAN unplugged | Yes | Gives you DHCP, which is convenient |
+| Ethernet cable laptop-to-laptop | Yes | No crossover cable needed |
+| Wi-Fi hotspot from one laptop | Yes | No upstream required |
+| Existing Wi-Fi LAN | Yes | Guest-network client isolation will block it |
+| Thunderbolt / USB4 networking | Yes | Virtual Ethernet adapter; fastest option |
+| USB bridge/transfer cable | Yes | Presents as a NIC to each side |
+| Two USB-C-to-Ethernet dongles | Yes | Ordinary cable between them |
+| **Plain USB-C cable between two laptops** | **No** | Both ends are USB hosts; there is no network |
+
+**Addressing.** A dumb switch or a direct cable means no DHCP, so Windows falls back to
+link-local addressing (169.254.x.x) after about thirty seconds. That works, but the addresses
+are ugly and can change between sessions. For a rig you use repeatedly, set static IPs on that
+interface once, for example 192.168.50.1 and 192.168.50.2.
+
+**Firewall.** A network Windows can't identify is often classified as **Public**, which blocks
+inbound connections: the listener binds, the peer connects to nothing, and no useful error
+appears. Set that interface's network profile to Private. From Milestone 7, cnverc detects the
+bound-but-never-accepted state and says so specifically, rather than showing a generic
+timeout.
+
+---
+
+## Licence
+
+Unpublished. Model files come with their own licences; check each one before you redistribute
+it.

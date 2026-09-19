@@ -1,7 +1,7 @@
 //! The window (Milestone 5).
 //!
 //! Everything from the earlier milestones is reachable from here without
-//! touching `convers.toml` or the command line: the recognizer (populated from
+//! touching `cnverc.toml` or the command line: the recognizer (populated from
 //! discovery, disabled entries shown with what is missing), both languages,
 //! both audio devices, speech on or off, the half-duplex gate, the comparison
 //! harness, and a caption pane with a latency readout underneath.
@@ -9,7 +9,7 @@
 //! Milestone 6 adds the two modes of SPEC §8: continuous listening, and turns
 //! taken with a key. The turn key is taken out of the input before any widget
 //! runs, so it never also presses whatever button has focus, and a large
-//! indicator shows at a glance whether convers is ready, recording, or
+//! indicator shows at a glance whether cnverc is ready, recording, or
 //! processing.
 //!
 //! The window never talks to a model or a device. It starts a [`Pipeline`],
@@ -45,13 +45,13 @@ const METER_FLOOR_DB: f32 = -60.0;
 pub fn run(root: PathBuf, config: Config) -> Result<()> {
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
-            .with_title("convers")
+            .with_title("cnverc")
             .with_inner_size([1000.0, 680.0])
             .with_min_inner_size([720.0, 480.0]),
         ..Default::default()
     };
     eframe::run_native(
-        "convers",
+        "cnverc",
         options,
         Box::new(move |_cc| Ok(Box::new(App::new(root, config)))),
     )
@@ -372,7 +372,7 @@ impl App {
             Some(key) => app.turn_key = key,
             None => {
                 app.notice = Some(format!(
-                    "[mode].turn_key = \"{}\" is not a key convers knows; using Space",
+                    "[mode].turn_key = \"{}\" is not a key cnverc knows; using Space",
                     app.config.mode.turn_key
                 ))
             }
@@ -486,7 +486,7 @@ impl App {
                     TurnStyle::Hold,
                     format!("Hold {key} while speaking"),
                 );
-                ui.weak("Change the key with [mode].turn_key in convers.toml.");
+                ui.weak("Change the key with [mode].turn_key in cnverc.toml.");
             });
         }
 
@@ -501,7 +501,7 @@ impl App {
         }
     }
 
-    /// The indicator of SPEC §8: whether convers is ready, recording or
+    /// The indicator of SPEC §8: whether cnverc is ready, recording or
     /// processing, readable from across a desk. Colour and word both change,
     /// so neither has to be relied on alone.
     fn indicator(&self, ui: &mut egui::Ui) {
@@ -810,7 +810,7 @@ impl App {
                 )
                 .on_hover_text(
                     "Half-duplex. Turn this off only when using headphones: with speakers, \
-                     convers hears its own voice and transcribes it.",
+                     cnverc hears its own voice and transcribes it.",
                 )
                 .changed();
 
@@ -834,7 +834,7 @@ impl App {
 
     fn top_bar(&mut self, ui: &mut egui::Ui) {
         ui.horizontal(|ui| {
-            ui.heading("convers");
+            ui.heading("cnverc");
             ui.add_space(16.0);
 
             let (label, stopping) = match (&self.session.state, self.running()) {

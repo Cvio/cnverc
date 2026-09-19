@@ -1,4 +1,4 @@
-//! Every path in `convers` derives from the executable's own location.
+//! Every path in `cnverc` derives from the executable's own location.
 //!
 //! SPEC §5: never the current working directory, never `%APPDATA%`, never the
 //! `dirs`/`directories` crates. Double-clicking from Explorer and launching
@@ -13,7 +13,7 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
 
-/// The directory containing `convers.exe`.
+/// The directory containing `cnverc.exe`.
 pub fn app_root() -> Result<PathBuf> {
     let exe = std::env::current_exe()?.canonicalize()?;
     let root = exe.parent().context("exe has no parent")?;
@@ -21,7 +21,7 @@ pub fn app_root() -> Result<PathBuf> {
 }
 
 /// `canonicalize()` on Windows hands back a verbatim path (`\\?\C:\...`). It is
-/// correct but unreadable, and every error message in convers quotes an
+/// correct but unreadable, and every error message in cnverc quotes an
 /// absolute path back to the user (SPEC §14), so the prefix is dropped when
 /// what remains is an ordinary drive path. Anything else passes through
 /// untouched, including UNC paths, where the prefix is load-bearing.
@@ -41,9 +41,9 @@ fn strip_verbatim(path: &Path) -> PathBuf {
     }
 }
 
-/// `<root>/convers.toml` — user selections (SPEC §7).
+/// `<root>/cnverc.toml` — user selections (SPEC §7).
 pub fn config_file(root: &Path) -> PathBuf {
-    root.join("convers.toml")
+    root.join("cnverc.toml")
 }
 
 /// `<root>/models` — the model tree (SPEC §5).
@@ -83,27 +83,27 @@ mod tests {
     #[test]
     fn a_verbatim_drive_path_is_made_readable() {
         assert_eq!(
-            strip_verbatim(Path::new(r"\\?\D:\AI_Data\convers")),
-            PathBuf::from(r"D:\AI_Data\convers")
+            strip_verbatim(Path::new(r"\\?\D:\AI_Data\cnverc")),
+            PathBuf::from(r"D:\AI_Data\cnverc")
         );
     }
 
     #[test]
     fn a_verbatim_unc_path_keeps_its_prefix() {
-        let unc = Path::new(r"\\?\UNC\server\share\convers");
+        let unc = Path::new(r"\\?\UNC\server\share\cnverc");
         assert_eq!(strip_verbatim(unc), unc.to_path_buf());
     }
 
     #[test]
     fn an_ordinary_path_is_untouched() {
-        let plain = Path::new("/opt/convers");
+        let plain = Path::new("/opt/cnverc");
         assert_eq!(strip_verbatim(plain), plain.to_path_buf());
     }
 
     #[test]
     fn every_location_hangs_off_the_root_it_is_given() {
-        let root = Path::new(r"X:\somewhere\convers");
-        assert_eq!(config_file(root), root.join("convers.toml"));
+        let root = Path::new(r"X:\somewhere\cnverc");
+        assert_eq!(config_file(root), root.join("cnverc.toml"));
         assert!(asr_dir(root).starts_with(root));
         assert!(tts_dir(root).starts_with(root));
         assert!(mt_dir(root).starts_with(root));

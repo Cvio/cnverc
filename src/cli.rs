@@ -25,10 +25,10 @@ pub enum Command {
 }
 
 pub const HELP: &str = "\
-convers — offline speech-to-speech translation
+cnverc — offline speech-to-speech translation
 
 USAGE:
-    convers [COMMAND]
+    cnverc [COMMAND]
 
 COMMANDS:
     (none)              Open the window
@@ -44,7 +44,7 @@ OPTIONS FOR --listen:
 
     -h, --help          Show this message
 
-convers never accesses the internet. Models are read from models/ beside the
+cnverc never accesses the internet. Models are read from models/ beside the
 executable; see README.md for what to put there.
 ";
 

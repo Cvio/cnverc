@@ -1,6 +1,6 @@
 //! Speech synthesis through sherpa-onnx's `OfflineTts`.
 //!
-//! Which voice speaks is decided by language, not by a setting: `convers.toml`
+//! Which voice speaks is decided by language, not by a setting: `cnverc.toml`
 //! has no key naming a TTS model, and SPEC §9 says the language on an incoming
 //! utterance is what tells the receiver which voice to use. So the voice is
 //! the discovered model that declares the target language, and the filesystem
@@ -231,13 +231,13 @@ mod tests {
     /// Synthesis against the real voice:
     ///
     /// ```bash
-    /// CONVERS_TEST_MODELS=/abs/path/models \
+    /// cnverc_TEST_MODELS=/abs/path/models \
     /// cargo test --release -- --ignored --nocapture speaks
     /// ```
     #[test]
     #[ignore = "needs an installed voice; see the doc comment"]
     fn speaks_the_target_language() {
-        let models_root = std::env::var("CONVERS_TEST_MODELS").expect("CONVERS_TEST_MODELS");
+        let models_root = std::env::var("cnverc_TEST_MODELS").expect("cnverc_TEST_MODELS");
         let engines = engines_from(&models_root);
         let engine = for_language(&engines, "en").expect("an English voice");
         let voice = Voice::load(engine).expect("load the voice");
@@ -262,7 +262,7 @@ mod tests {
         assert!(peak > 0.05, "the audio is silent (peak {peak})");
 
         // Worth hearing rather than only asserting about.
-        let out = std::env::temp_dir().join("convers-tts-check.wav");
+        let out = std::env::temp_dir().join("cnverc-tts-check.wav");
         crate::wav::write_any(&out, &speech.samples, speech.sample_rate).expect("write");
         println!("wrote {}", out.display());
     }
@@ -270,7 +270,7 @@ mod tests {
     #[test]
     #[ignore = "needs installed voices; see the doc comment"]
     fn an_uninstalled_language_is_refused_not_substituted() {
-        let models_root = std::env::var("CONVERS_TEST_MODELS").expect("CONVERS_TEST_MODELS");
+        let models_root = std::env::var("cnverc_TEST_MODELS").expect("cnverc_TEST_MODELS");
         let engines = engines_from(&models_root);
         let message = match for_language(&engines, "ja") {
             Ok(engine) => panic!("substituted {} for Japanese", engine.dir_name),

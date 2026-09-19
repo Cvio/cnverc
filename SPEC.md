@@ -1,4 +1,4 @@
-# SPEC.md — `convers`
+# SPEC.md — `cnverc`
 
 **Read this entire file before writing any code.** This is a build specification, not a
 suggestion list. The constraints in §2 are the reason the project exists; violating one of
@@ -8,7 +8,7 @@ them makes the deliverable worthless even if it compiles and runs.
 
 ## 1. What we are building
 
-`convers` is a desktop application that listens to speech in one language and produces text
+`cnverc` is a desktop application that listens to speech in one language and produces text
 and spoken audio in another, entirely offline, running as a single self-contained folder that
 can be copied to a machine with no internet connection, no Node, no Python, no Ollama, and no
 toolchain of any kind, and will run.
@@ -16,8 +16,8 @@ toolchain of any kind, and will run.
 Pipeline: **microphone → VAD → ASR → translation → TTS → speakers**, with on-screen captions
 alongside.
 
-Two operating modes (§8) and an optional paired mode (§9) in which two instances of `convers`
-on two machines on a local network act as the two ends of a conversation.
+Two operating modes (§8) and an optional paired mode (§9) in which two instances of `cnverc`
+on two machines on a local network act as the two ends of a cnvercation.
 
 Primary language pair for development and testing: **Spanish ⇄ English**. The design must not
 hardcode that pair, but it also should not be generalized past what this spec requires.
@@ -44,7 +44,7 @@ loses. If you believe one of these is wrong, stop and say so rather than working
 1. **The application must never require, attempt, or depend on internet access.** No model
    downloads, no telemetry, no update checks, no license checks, no cloud inference, no
    public DNS lookups, no CDN fetches, no crash reporting. If a required model file is absent,
-   `convers` prints the exact absolute path it expected and exits non-zero. It does not offer
+   `cnverc` prints the exact absolute path it expected and exits non-zero. It does not offer
    to fetch it.
 
    **Local network sockets are explicitly permitted and required** for paired mode (§9):
@@ -60,7 +60,7 @@ loses. If you believe one of these is wrong, stop and say so rather than working
 
 2. **No separate services.** No Ollama, no `localhost:11434`, no sidecar process, no Docker,
    no external inference server. Every model runs in-process. (The peer listener in §9 is part
-   of `convers` itself, not a separate service.)
+   of `cnverc` itself, not a separate service.)
 
 3. **No JavaScript toolchain.** No `package.json`, no `node_modules`, no npm, no bundler,
    anywhere in the repository. The GUI is native Rust (§4).
@@ -138,9 +138,9 @@ or a web UI.
 ## 5. Directory layout
 
 ```
-convers/
-  convers.exe
-  convers.toml
+cnverc/
+  cnverc.exe
+  cnverc.toml
   models/
     vad/
       silero_vad.onnx
@@ -182,7 +182,7 @@ fn app_root() -> anyhow::Result<PathBuf> {
 
 ## 6. Model discovery — the filesystem is the index
 
-Each ASR and TTS model directory contains an `engine.toml` describing itself. `convers`
+Each ASR and TTS model directory contains an `engine.toml` describing itself. `cnverc`
 enumerates subdirectories of `models/asr/` at startup, parses each `engine.toml`, and
 populates the selector from the results. Adding a model means dropping a folder in and
 restarting. There is no registry, no database, no cache, and no download UI.
@@ -228,7 +228,7 @@ Validation rules:
 
 ## 7. Configuration
 
-`convers.toml` at the app root holds only user selections, by directory name.
+`cnverc.toml` at the app root holds only user selections, by directory name.
 
 ```toml
 [asr]
@@ -286,7 +286,7 @@ turn closes it and flushes whatever was captured as a single utterance.
 - **`turn_style = "toggle"`** (default): press to start the turn, press again to end it. This
   is what you want for anything longer than a sentence.
 - **`turn_style = "hold"`**: capture only while the key is held. Better for short exchanges.
-- The key must work while the `convers` window has focus. Do **not** install a global/system-wide
+- The key must work while the `cnverc` window has focus. Do **not** install a global/system-wide
   hotkey; it is a permissions and antivirus problem on Windows and is out of scope.
 - Spacebar must not also activate whatever egui widget currently has keyboard focus. Handle the
   turn key before widget input and consume the event.
@@ -299,9 +299,9 @@ the mode.
 
 ---
 
-## 9. Paired mode — two machines, one conversation
+## 9. Paired mode — two machines, one cnvercation
 
-Two instances of `convers` on a local network act as the two ends of a conversation. Person A
+Two instances of `cnverc` on a local network act as the two ends of a cnvercation. Person A
 speaks Spanish into laptop A; laptop B displays and speaks the English.
 
 ### What crosses the wire
@@ -376,13 +376,13 @@ Allowed, but both microphones are live and both sets of speakers are playing, so
 floor token gating anything. In a shared room the two machines will transcribe each other's TTS
 output in a loop.
 
-`convers` must **display a persistent warning** when continuous mode and paired mode are both
+`cnverc` must **display a persistent warning** when continuous mode and paired mode are both
 active, stating that headsets are required. Do not silently degrade, and do not try to solve
 this with echo cancellation.
 
 ### Discovery
 
-mDNS (service type `_convers._tcp.local`) or a UDP broadcast on port 47801 may be used to find
+mDNS (service type `_cnverc._tcp.local`) or a UDP broadcast on port 47801 may be used to find
 peers on the local link and populate a pick-list. This is **convenience only**. Manual IP entry
 must always be available and must always work, because managed switches and VLAN configurations
 drop multicast and the user must never be locked out of the feature by network policy.
@@ -393,7 +393,7 @@ drop multicast and the user must never be locked out of the feature by network p
 
 ### Acoustic feedback (single machine)
 
-If TTS output plays through speakers while the microphone is live, `convers` hears its own
+If TTS output plays through speakers while the microphone is live, `cnverc` hears its own
 translated speech, the VAD triggers on it, and the ASR transcribes it. This does not appear in a
 captions-only build, so it arrives as a surprise the moment TTS is switched on.
 
@@ -556,7 +556,7 @@ focused widget.
 peer panel in the UI showing local interface addresses and their IPs, the firewall diagnostic,
 the continuous-mode headset warning. Discovery last, and only after manual entry works.
 *Check:* two laptops on an isolated switch with no internet hold a turn-based Spanish/English
-conversation; unplugging the WAN uplink changes nothing; pulling the cable mid-session
+cnvercation; unplugging the WAN uplink changes nothing; pulling the cable mid-session
 force-releases the floor and shows a disconnected state on both ends.
 
 **M8 — Streaming ASR.** `StreamAsr` against `OnlineRecognizer` with a streaming model. `Partial`

@@ -1,16 +1,16 @@
-# convers
+# cnverc
 
 Offline speech-to-speech translation. Microphone → VAD → ASR → translation → TTS → speakers,
 with captions, running as a single folder you can copy to a machine that has never been
 online.
 
-`convers` **never touches the internet**. It does not download models, check for updates,
+`cnverc` **never touches the internet**. It does not download models, check for updates,
 phone home, or talk to any service. If a model file is missing it prints the absolute path it
 expected and exits non-zero. See `CLAUDE.md` for the constraints in full, and `SPEC.md` for
 the build specification.
 
 Local network sockets are a different matter and are used deliberately: paired mode (two
-machines, one conversation) is plain TCP to an address you type in, and works on a switch with
+machines, one cnvercation) is plain TCP to an address you type in, and works on a switch with
 no uplink and no DNS anywhere.
 
 ## Status
@@ -19,19 +19,19 @@ no uplink and no DNS anywhere.
 or Whisper, translation with a GGUF model in process, and speech through a Piper voice — all
 offline. Milestones are listed in `SPEC.md` §13 and are built in order.
 
-Double-click `convers.exe`, or run it with no arguments, and the window opens. Everything is
+Double-click `cnverc.exe`, or run it with no arguments, and the window opens. Everything is
 set from there — recognizer, languages, microphone and output, speech, half-duplex, and the
-recognizer comparison — and choices are saved back to `convers.toml` with its comments left
+recognizer comparison — and choices are saved back to `cnverc.toml` with its comments left
 alone. The command line remains for shells, logs and scripted checks:
 
 ```bash
-convers                       # open the window
-convers --report              # what models are installed
-convers --devices             # what microphones and outputs are available
-convers --listen              # listen, translate and speak, logging to the terminal
-convers --listen --wav        # also write each utterance to logs/segments/
-convers --listen --compare    # run every recognizer on each utterance, side by side
-convers --listen --seconds 20 # stop cleanly after 20 s of listening
+cnverc                       # open the window
+cnverc --report              # what models are installed
+cnverc --devices             # what microphones and outputs are available
+cnverc --listen              # listen, translate and speak, logging to the terminal
+cnverc --listen --wav        # also write each utterance to logs/segments/
+cnverc --listen --compare    # run every recognizer on each utterance, side by side
+cnverc --listen --seconds 20 # stop cleanly after 20 s of listening
 ```
 
 A console window opens alongside the main one for now, carrying the log. Hiding it is a
@@ -50,16 +50,16 @@ test), the two compare like this.
 
 The 0.6B fails by handing the source straight back, or occasionally by producing a confident
 wrong answer. No prompt wording fixed that; wording that stopped the echo produced wrong
-translations instead. convers refuses an echo rather than captioning and speaking untranslated
+translations instead. cnverc refuses an echo rather than captioning and speaking untranslated
 text, but only a better model fixes a wrong answer.
 
 To change model, put a different Qwen3 GGUF in `models/mt/` and move the old one out. Nothing
 else changes, because the filesystem is the index. It must be a Qwen3 model: the prompt is
 written for Qwen's chat format.
 
-`models/mt/` holds exactly one `.gguf`. There is no key in `convers.toml` naming it — §7 does
+`models/mt/` holds exactly one `.gguf`. There is no key in `cnverc.toml` naming it — §7 does
 not define one — so the filesystem is the index here too; two files is an error asking you to
-remove one rather than convers choosing for you.
+remove one rather than cnverc choosing for you.
 
 `--compare` exists because published word error rates are measured on read speech, not on your
 microphone and your accent (`SPEC.md` §12). It prints each engine's transcript with the wall
@@ -68,14 +68,14 @@ clock time and the duration of the audio, always together: Whisper pads every ut
 
 ## Layout
 
-Everything resolves from the directory containing `convers.exe` — never from the working
+Everything resolves from the directory containing `cnverc.exe` — never from the working
 directory, never from `%APPDATA%`. Move the folder anywhere, including another drive, and
 nothing changes.
 
 ```
-convers/
-  convers.exe
-  convers.toml
+cnverc/
+  cnverc.exe
+  cnverc.toml
   models/
     vad/silero_vad.onnx
     asr/<engine dir>/engine.toml + model files
@@ -127,7 +127,7 @@ depends on Windows system DLLs only:
 kernel32.dll  advapi32.dll  ole32.dll  oleaut32.dll  dbghelp.dll  setupapi.dll  dxgi.dll  ntdll.dll
 ```
 
-Worth re-checking with `dumpbin -dependents convers.exe` whenever a dependency is added.
+Worth re-checking with `dumpbin -dependents cnverc.exe` whenever a dependency is added.
 
 ### Build-time internet caveat (applies from Milestone 1)
 
@@ -146,11 +146,11 @@ it — Vulkan-backed whisper builds have failed on this platform before.
 
 ### Running during development
 
-`convers` looks for `models/` and `convers.toml` next to the executable, which during
+`cnverc` looks for `models/` and `cnverc.toml` next to the executable, which during
 development means `target/debug/`. Copy them once:
 
 ```bash
-cp -r models convers.toml target/debug/
+cp -r models cnverc.toml target/debug/
 ```
 
 Checks:
@@ -165,7 +165,7 @@ Two tests need files that are not in the repository — the VAD model, and a 16 
 recording of someone talking — so they are `#[ignore]`d by default:
 
 ```bash
-CONVERS_TEST_VAD_MODEL=/abs/path/silero_vad.onnx CONVERS_TEST_WAV=/abs/path/speech.wav CONVERS_TEST_MODELS=/abs/path/models CONVERS_TEST_WAV_ES=/abs/path/spanish-16k.wav cargo test --release -- --ignored --nocapture
+cnverc_TEST_VAD_MODEL=/abs/path/silero_vad.onnx cnverc_TEST_WAV=/abs/path/speech.wav cnverc_TEST_MODELS=/abs/path/models cnverc_TEST_WAV_ES=/abs/path/spanish-16k.wav cargo test --release -- --ignored --nocapture
 ```
 
 Both recordings must be 16 kHz mono: the pipeline resamples at the capture boundary and
@@ -175,7 +175,7 @@ archive ships `test_wavs/es.wav`, which is 22050 Hz — convert it once with
 
 ## Models
 
-`convers` does not fetch any of these. Download them on a machine that has internet, extract
+`cnverc` does not fetch any of these. Download them on a machine that has internet, extract
 them into the layout above, and copy the folder across. The application never uses the URLs
 below — they are here for you, not for it.
 
@@ -195,7 +195,7 @@ page rather than assuming the one quoted here:
 | English Piper voice | `models/tts/vits-piper-en_US-lessac-medium/` | `vits-piper-en_US-lessac-medium.tar.bz2` (64 MB) from the TTS release listing |
 | Spanish Piper voice | `models/tts/vits-piper-es_ES-carlfm-x_low/` | `vits-piper-es_ES-carlfm-x_low.tar.bz2` (25 MB) from the TTS release listing |
 
-A voice is chosen by **language**, not by a setting: convers speaks with the installed voice
+A voice is chosen by **language**, not by a setting: cnverc speaks with the installed voice
 that declares `[languages].target`. Install a voice for whichever language you translate into —
 for Spanish→English that is the English one. Piper voices also need their `espeak-ng-data`
 directory, which the archive contains and `engine.toml` names with `data_dir`, because a
@@ -242,7 +242,7 @@ interface once — 192.168.50.1 and 192.168.50.2 — and forget about it.
 **Firewall.** A cable or uplink-less switch produces a network Windows cannot identify, and it
 is frequently classified as **Public**, which blocks inbound connections. The listener binds,
 the peer connects to nothing, and no useful error appears. Set that interface's network
-profile to Private. From Milestone 7, `convers` detects the bound-but-never-accepted state and
+profile to Private. From Milestone 7, `cnverc` detects the bound-but-never-accepted state and
 says so specifically rather than showing a generic timeout.
 
 ## Licence

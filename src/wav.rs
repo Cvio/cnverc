@@ -1,6 +1,6 @@
 //! WAV files, for ears and for tests.
 //!
-//! convers does not need WAV at runtime — it exists so a captured utterance
+//! cnverc does not need WAV at runtime — it exists so a captured utterance
 //! can be played back and judged by a human (Milestone 1's check) and so the
 //! dual-run harness (SPEC §12) has something to feed.
 
@@ -94,7 +94,7 @@ mod tests {
 
     #[test]
     fn a_written_wav_reads_back_as_what_went_in() {
-        let path = std::env::temp_dir().join(format!("convers-wav-{}.wav", std::process::id()));
+        let path = std::env::temp_dir().join(format!("cnverc-wav-{}.wav", std::process::id()));
         let original: Vec<f32> = (0..SAMPLE_RATE as usize / 100)
             .map(|i| (i as f32 * 0.05).sin() * 0.8)
             .collect();
@@ -112,7 +112,7 @@ mod tests {
 
     #[test]
     fn samples_outside_the_range_are_clamped_not_wrapped() {
-        let path = std::env::temp_dir().join(format!("convers-clamp-{}.wav", std::process::id()));
+        let path = std::env::temp_dir().join(format!("cnverc-clamp-{}.wav", std::process::id()));
         write_16k_mono(&path, &[2.0, -2.0]).expect("write");
         let read_back = read_16k_mono(&path).expect("read");
         let _ = std::fs::remove_file(&path);

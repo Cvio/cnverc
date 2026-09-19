@@ -2,8 +2,8 @@
 //!
 //! sherpa's `VoiceActivityDetector` does the segmenting itself — it is fed
 //! fixed windows and hands back complete speech segments with their start
-//! offset — so convers does not run a second segmentation state machine on top
-//! of it. The `[vad]` keys in `convers.toml` map straight onto its config.
+//! offset — so cnverc does not run a second segmentation state machine on top
+//! of it. The `[vad]` keys in `cnverc.toml` map straight onto its config.
 //!
 //! In turn-based mode (Milestone 6) this same detector is used only to trim
 //! leading and trailing silence, not to decide boundaries. That is a question
@@ -69,7 +69,7 @@ impl Segment {
     }
 }
 
-/// Tunables from `[vad]` in `convers.toml`, plus where the model lives.
+/// Tunables from `[vad]` in `cnverc.toml`, plus where the model lives.
 #[derive(Debug, Clone)]
 pub struct VadSettings {
     pub model: PathBuf,
@@ -104,12 +104,12 @@ pub struct Segmenter {
 
 impl Segmenter {
     /// Load the model and configure the detector. A missing model file is an
-    /// error naming the absolute path; convers never downloads it (SPEC §2.1).
+    /// error naming the absolute path; cnverc never downloads it (SPEC §2.1).
     pub fn new(settings: &VadSettings) -> Result<Self> {
         let model = absolute(&settings.model);
         if !model.is_file() {
             return Err(anyhow!(
-                "VAD model not found: {}\nconvers never downloads models; place silero_vad.onnx \
+                "VAD model not found: {}\ncnverc never downloads models; place silero_vad.onnx \
                  at that exact path (see README.md) and run again.",
                 model.display()
             ));
@@ -307,7 +307,7 @@ mod tests {
             .is_absolute(),
             "{message}"
         );
-        // It says convers will not fetch it; it never offers a URL to fetch.
+        // It says cnverc will not fetch it; it never offers a URL to fetch.
         assert!(message.contains("never downloads"), "{message}");
         assert!(!message.contains("http"), "{message}");
     }
@@ -327,12 +327,12 @@ mod tests {
     /// Needs only the model:
     ///
     /// ```bash
-    /// CONVERS_TEST_VAD_MODEL=/abs/silero_vad.onnx     /// cargo test -- --ignored --nocapture silence
+    /// cnverc_TEST_VAD_MODEL=/abs/silero_vad.onnx     /// cargo test -- --ignored --nocapture silence
     /// ```
     #[test]
     #[ignore = "needs the Silero model; see the doc comment"]
     fn silence_produces_no_segments() {
-        let model = std::env::var("CONVERS_TEST_VAD_MODEL").expect("CONVERS_TEST_VAD_MODEL");
+        let model = std::env::var("cnverc_TEST_VAD_MODEL").expect("cnverc_TEST_VAD_MODEL");
         let mut segmenter = Segmenter::new(&settings(&model)).expect("load the VAD");
 
         // Ten seconds of digital silence, then ten of quiet room noise.
@@ -378,15 +378,15 @@ mod tests {
     /// together, and history that has to be trimmed as it runs.
     ///
     /// ```bash
-    /// CONVERS_TEST_VAD_MODEL=/abs/silero_vad.onnx \
-    /// CONVERS_TEST_WAV=/abs/speech.wav \
+    /// cnverc_TEST_VAD_MODEL=/abs/silero_vad.onnx \
+    /// cnverc_TEST_WAV=/abs/speech.wav \
     /// cargo test --release -- --ignored --nocapture pre_roll
     /// ```
     #[test]
     #[ignore = "needs the Silero model and a recording; see the doc comment"]
     fn pre_roll_splices_exactly_and_never_overlaps() {
-        let model = std::env::var("CONVERS_TEST_VAD_MODEL").expect("CONVERS_TEST_VAD_MODEL");
-        let wav = std::env::var("CONVERS_TEST_WAV").expect("CONVERS_TEST_WAV");
+        let model = std::env::var("cnverc_TEST_VAD_MODEL").expect("cnverc_TEST_VAD_MODEL");
+        let wav = std::env::var("cnverc_TEST_WAV").expect("cnverc_TEST_WAV");
         let audio = crate::wav::read_16k_mono(Path::new(&wav)).expect("read the test wav");
 
         let mut segmenter = Segmenter::new(&settings(&model)).expect("load the VAD");
@@ -439,15 +439,15 @@ mod tests {
     /// timestamped where it really happened, not from zero.
     ///
     /// ```bash
-    /// CONVERS_TEST_VAD_MODEL=/abs/silero_vad.onnx \
-    /// CONVERS_TEST_WAV=/abs/speech.wav \
+    /// cnverc_TEST_VAD_MODEL=/abs/silero_vad.onnx \
+    /// cnverc_TEST_WAV=/abs/speech.wav \
     /// cargo test --release -- --ignored --nocapture timeline
     /// ```
     #[test]
     #[ignore = "needs the Silero model and a recording; see the doc comment"]
     fn a_reset_keeps_segments_on_the_capture_timeline() {
-        let model = std::env::var("CONVERS_TEST_VAD_MODEL").expect("CONVERS_TEST_VAD_MODEL");
-        let wav = std::env::var("CONVERS_TEST_WAV").expect("CONVERS_TEST_WAV");
+        let model = std::env::var("cnverc_TEST_VAD_MODEL").expect("cnverc_TEST_VAD_MODEL");
+        let wav = std::env::var("cnverc_TEST_WAV").expect("cnverc_TEST_WAV");
         let audio = crate::wav::read_16k_mono(Path::new(&wav)).expect("read the test wav");
 
         // Feed a third, discard a second of audio as the gate would, feed
@@ -540,15 +540,15 @@ mod tests {
     /// from the environment because neither belongs in the repository:
     ///
     /// ```bash
-    /// CONVERS_TEST_VAD_MODEL=/abs/silero_vad.onnx \
-    /// CONVERS_TEST_WAV=/abs/speech.wav \
+    /// cnverc_TEST_VAD_MODEL=/abs/silero_vad.onnx \
+    /// cnverc_TEST_WAV=/abs/speech.wav \
     /// cargo test -- --ignored --nocapture vad_cuts
     /// ```
     #[test]
     #[ignore = "needs the Silero model and a speech recording; see the doc comment"]
     fn vad_cuts_speech_out_of_a_recording() {
-        let model = std::env::var("CONVERS_TEST_VAD_MODEL").expect("CONVERS_TEST_VAD_MODEL");
-        let wav = std::env::var("CONVERS_TEST_WAV").expect("CONVERS_TEST_WAV");
+        let model = std::env::var("cnverc_TEST_VAD_MODEL").expect("cnverc_TEST_VAD_MODEL");
+        let wav = std::env::var("cnverc_TEST_WAV").expect("cnverc_TEST_WAV");
 
         let audio = crate::wav::read_16k_mono(Path::new(&wav)).expect("read the test wav");
         let total_ms = audio.len() as u64 * 1000 / SAMPLE_RATE as u64;

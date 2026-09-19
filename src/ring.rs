@@ -14,7 +14,7 @@ use std::sync::Arc;
 use crate::audio::SAMPLE_RATE;
 
 /// Utterances retained by default. Twenty is about ten minutes of
-/// conversation, and at 16 kHz mono f32 costs a few tens of megabytes at worst.
+/// cnvercation, and at 16 kHz mono f32 costs a few tens of megabytes at worst.
 pub const DEFAULT_CAPACITY: usize = 20;
 
 /// One captured utterance, keyed by when it started.

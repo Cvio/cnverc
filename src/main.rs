@@ -1,4 +1,4 @@
-//! `convers` — offline speech-to-speech translation.
+//! `cnverc` — offline speech-to-speech translation.
 //!
 //! Started with no arguments, as a double-click from Explorer does, it opens
 //! the window. The command-line flags remain for shells, logs and the
@@ -47,7 +47,7 @@ fn main() -> Result<()> {
     let _log_guard = init_logging(&root);
 
     println!(
-        "convers {} — offline, no network required",
+        "cnverc {} — offline, no network required",
         env!("CARGO_PKG_VERSION")
     );
     println!("app root: {}", root.display());
@@ -84,7 +84,7 @@ fn main() -> Result<()> {
     if !models_root.is_dir() {
         anyhow::bail!(
             "model directory not found: {}\n\
-             convers never downloads models. Create that directory and place the model \
+             cnverc never downloads models. Create that directory and place the model \
              folders in it as described in README.md, then run again.",
             models_root.display()
         );
@@ -212,7 +212,7 @@ fn report_selection(config: &Config, asr: &[Entry]) {
 }
 
 /// stdout plus a rolling file in `<root>/logs` (SPEC §4). If the log directory
-/// cannot be created, `convers` still runs and still logs to stdout — losing
+/// cannot be created, `cnverc` still runs and still logs to stdout — losing
 /// the file is not worth refusing to start over.
 fn init_logging(root: &Path) -> Option<tracing_appender::non_blocking::WorkerGuard> {
     let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
@@ -221,7 +221,7 @@ fn init_logging(root: &Path) -> Option<tracing_appender::non_blocking::WorkerGua
     let logs = paths::logs_dir(root);
     match std::fs::create_dir_all(&logs) {
         Ok(()) => {
-            let appender = tracing_appender::rolling::daily(&logs, "convers.log");
+            let appender = tracing_appender::rolling::daily(&logs, "cnverc.log");
             let (writer, guard) = tracing_appender::non_blocking(appender);
             let file_layer = tracing_subscriber::fmt::layer()
                 .with_writer(writer)

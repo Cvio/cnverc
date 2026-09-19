@@ -55,7 +55,7 @@ fn backend() -> Result<&'static LlamaBackend> {
     BACKEND
         .get_or_init(|| {
             // llama.cpp narrates model loading to stderr in great detail;
-            // convers has its own log and does not need it twice.
+            // cnverc has its own log and does not need it twice.
             llama_cpp_2::send_logs_to_tracing(
                 llama_cpp_2::LogOptions::default().with_logs_enabled(false),
             );
@@ -78,7 +78,7 @@ impl LlamaTranslator {
     pub fn load(path: &Path) -> Result<Self> {
         if !path.is_file() {
             return Err(anyhow!(
-                "translation model not found: {}\nconvers never downloads models; place the \
+                "translation model not found: {}\ncnverc never downloads models; place the \
                  GGUF at that exact path (see README.md) and run again.",
                 path.display()
             ));
@@ -263,7 +263,7 @@ pub fn language_name(code: &str) -> &str {
 /// announce "a question is translated as a question, an instruction is
 /// translated as an instruction" through the speakers.
 ///
-/// The check is exact rather than clever. convers wrote the prompt, so it can
+/// The check is exact rather than clever. cnverc wrote the prompt, so it can
 /// recognise any run of it coming back.
 fn leaks_the_prompt(output: &str, source: &str, target: &str) -> bool {
     const MIN_WORDS: usize = 4;
@@ -564,12 +564,12 @@ mod tests {
     /// live session speak the system prompt aloud.
     ///
     /// ```bash
-    /// CONVERS_TEST_GGUF=/abs/path/qwen3-0.6b-q4_k_m.gguf     /// cargo test --release -- --ignored --nocapture guards_
+    /// cnverc_TEST_GGUF=/abs/path/qwen3-0.6b-q4_k_m.gguf     /// cargo test --release -- --ignored --nocapture guards_
     /// ```
     #[test]
     #[ignore = "needs the translation GGUF; see the doc comment"]
     fn guards_reject_what_is_not_a_translation() {
-        let path = std::env::var("CONVERS_TEST_GGUF").expect("CONVERS_TEST_GGUF");
+        let path = std::env::var("cnverc_TEST_GGUF").expect("cnverc_TEST_GGUF");
         let mut translator = LlamaTranslator::load(Path::new(&path)).expect("load");
 
         // Nonsense: whatever comes back must not reach a caption or a speaker.
@@ -634,13 +634,13 @@ mod tests {
     /// a translation is right is read from the output.
     ///
     /// ```bash
-    /// CONVERS_TEST_GGUF=/abs/path/model.gguf \
+    /// cnverc_TEST_GGUF=/abs/path/model.gguf \
     /// cargo test --release -- --ignored --nocapture bench_both_directions
     /// ```
     #[test]
     #[ignore = "needs a translation GGUF; see the doc comment"]
     fn bench_both_directions() {
-        let path = std::env::var("CONVERS_TEST_GGUF").expect("CONVERS_TEST_GGUF");
+        let path = std::env::var("cnverc_TEST_GGUF").expect("cnverc_TEST_GGUF");
         let mut translator = LlamaTranslator::load(Path::new(&path)).expect("load");
         println!("model: {path}");
 
@@ -688,13 +688,13 @@ mod tests {
     /// instead of translating:
     ///
     /// ```bash
-    /// CONVERS_TEST_GGUF=/abs/path/qwen3-0.6b-q4_k_m.gguf \
+    /// cnverc_TEST_GGUF=/abs/path/qwen3-0.6b-q4_k_m.gguf \
     /// cargo test --release -- --ignored --nocapture translates_
     /// ```
     #[test]
     #[ignore = "needs the translation GGUF; see the doc comment"]
     fn translates_spanish_to_english_without_answering() {
-        let path = std::env::var("CONVERS_TEST_GGUF").expect("CONVERS_TEST_GGUF");
+        let path = std::env::var("cnverc_TEST_GGUF").expect("cnverc_TEST_GGUF");
         let mut translator = LlamaTranslator::load(Path::new(&path)).expect("load");
 
         let cases = [

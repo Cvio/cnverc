@@ -1,4 +1,4 @@
-# CLAUDE.md — `convers`
+# CLAUDE.md — `cnverc`
 
 `SPEC.md` is the build specification. Read it before changing anything. This file exists so
 the constraints below survive into sessions that have not read it.
@@ -11,7 +11,7 @@ loses. If you believe one of these is wrong, stop and say so rather than working
 1. **The application must never require, attempt, or depend on internet access.** No model
    downloads, no telemetry, no update checks, no license checks, no cloud inference, no
    public DNS lookups, no CDN fetches, no crash reporting. If a required model file is absent,
-   `convers` prints the exact absolute path it expected and exits non-zero. It does not offer
+   `cnverc` prints the exact absolute path it expected and exits non-zero. It does not offer
    to fetch it.
 
    **Local network sockets are explicitly permitted and required** for paired mode (SPEC §9):
@@ -27,7 +27,7 @@ loses. If you believe one of these is wrong, stop and say so rather than working
 
 2. **No separate services.** No Ollama, no `localhost:11434`, no sidecar process, no Docker,
    no external inference server. Every model runs in-process. (The peer listener in SPEC §9 is
-   part of `convers` itself, not a separate service.)
+   part of `cnverc` itself, not a separate service.)
 
 3. **No JavaScript toolchain.** No `package.json`, no `node_modules`, no npm, no bundler,
    anywhere in the repository. The GUI is native Rust (SPEC §4).

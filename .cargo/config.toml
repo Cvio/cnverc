@@ -29,3 +29,11 @@ CMAKE_MSVC_RUNTIME_LIBRARY = "MultiThreaded"
 # Windows only: the Linux path (a nice-to-have, SPEC §3) is left alone.
 [target.x86_64-pc-windows-msvc]
 rustflags = ["-C", "target-feature=+crt-static"]
+
+# Linux links sherpa-onnx as a shared library (see Cargo.toml). Its build
+# script copies the .so files next to the executable, but a dependency's
+# link arguments never reach the final binary, so the executable is told
+# here to look in its own folder. $ORIGIN keeps the folder self-contained,
+# which is what SPEC §2.4 asks of every path.
+[target.x86_64-unknown-linux-gnu]
+rustflags = ["-C", "link-arg=-Wl,-rpath,$ORIGIN"]

@@ -14,7 +14,6 @@ toml = "0.8"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 tracing-appender = "0.2"
-sherpa-onnx = "1.13.8"
 cpal = "0.16.0"
 hound = "3.5.1"
 # default features pull in openmp, which links VCOMP140.DLL from the Visual C++
@@ -27,6 +26,21 @@ eframe = "0.36"
 serde_json = "1"
 gethostname = "1"
 if-addrs = "0.15.0"
+
+# sherpa-onnx is split by platform so the Windows build is untouched: the
+# static library, linked against the static CRT (see .cargo/config.toml).
+[target.'cfg(not(target_os = "linux"))'.dependencies]
+sherpa-onnx = "1.13.8"
+
+# On Linux the prebuilt static archive's onnxruntime aborts with
+# "free(): invalid pointer" the moment a model session is created (seen on
+# Ubuntu 26.04, GCC 15, glibc 2.43; sherpa-onnx's own binaries crash the same
+# way). The shared build against the system onnxruntime works. Build with
+# SHERPA_ONNX_LIB_DIR pointing at a sherpa-onnx built with BUILD_SHARED_LIBS=ON;
+# see README, "Setting up on Linux". The features must be exclusive: enabling
+# `shared` on top of the default `static` is an error in sherpa-onnx-sys.
+[target.'cfg(target_os = "linux")'.dependencies]
+sherpa-onnx = { version = "1.13.8", default-features = false, features = ["shared"] }
 
 [profile.release]
 opt-level = 3

@@ -246,12 +246,51 @@ fails, note exactly what it printed.
    curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
    ```
 
-3. **Get the code and build it**, as in steps 4 and 5 above. There is no `export PATH` line on
-   Linux; `cargo build --release` is enough.
+3. **Build the speech library.** On Windows the build downloads it ready-made. On Linux the
+   ready-made one crashes as soon as it loads a model (`free(): invalid pointer`), so build it
+   yourself, as a shared library using Ubuntu's own onnxruntime. Do this once, next to the
+   cnverc folder. The version must be exactly `v1.13.8`:
 
-4. **Download the models** with exactly the commands in step 6. They work unchanged.
+   ```bash
+   sudo apt install libonnxruntime-dev
+   ```
 
-5. **Check and run** as in steps 7 and 8. The program is `cnverc`, with no `.exe`:
+   ```bash
+   git clone https://github.com/k2-fsa/sherpa-onnx && cd sherpa-onnx && git checkout v1.13.8
+   ```
+
+   ```bash
+   cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=ON -DSHERPA_ONNX_ENABLE_PYTHON=OFF -DSHERPA_ONNX_ENABLE_TESTS=OFF -DCMAKE_INSTALL_PREFIX="$HOME/sherpa-onnx/install"
+   ```
+
+   ```bash
+   cmake --build build -j2 --target install
+   ```
+
+   Check that the configure step printed `location_onnxruntime_lib: /usr/lib/...`. If it says
+   `Downloading pre-compiled onnxruntime` instead, `libonnxruntime-dev` isn't installed.
+   `-j2` keeps the build within about 8 GB of memory; a larger number can run out.
+
+4. **Get the code and build it**, as in steps 4 and 5 above, but with no `export PATH` line.
+   Tell the build where the speech library is, in every new terminal you build from:
+
+   ```bash
+   export SHERPA_ONNX_LIB_DIR="$HOME/sherpa-onnx/install/lib"
+   ```
+
+   ```bash
+   cargo build --release -j2
+   ```
+
+   The build copies `libsherpa-onnx-c-api.so` into `target/release/` next to `cnverc`, which
+   finds it there. It also needs Ubuntu's `libonnxruntime` package, so a Linux build isn't
+   copy-to-run like the Windows one. If `lib` in that folder contains a `libonnxruntime.a`
+   (left over from building sherpa-onnx without `BUILD_SHARED_LIBS=ON`), move it out;
+   otherwise the build links it again, and the crash comes back.
+
+5. **Download the models** with exactly the commands in step 6. They work unchanged.
+
+6. **Check and run** as in steps 7 and 8. The program is `cnverc`, with no `.exe`:
 
    ```bash
    ./target/release/cnverc --report

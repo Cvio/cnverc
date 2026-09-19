@@ -231,13 +231,13 @@ mod tests {
     /// Synthesis against the real voice:
     ///
     /// ```bash
-    /// cnverc_TEST_MODELS=/abs/path/models \
+    /// CNVERC_TEST_MODELS=/abs/path/models \
     /// cargo test --release -- --ignored --nocapture speaks
     /// ```
     #[test]
     #[ignore = "needs an installed voice; see the doc comment"]
     fn speaks_the_target_language() {
-        let models_root = std::env::var("cnverc_TEST_MODELS").expect("cnverc_TEST_MODELS");
+        let models_root = std::env::var("CNVERC_TEST_MODELS").expect("CNVERC_TEST_MODELS");
         let engines = engines_from(&models_root);
         let engine = for_language(&engines, "en").expect("an English voice");
         let voice = Voice::load(engine).expect("load the voice");
@@ -270,7 +270,7 @@ mod tests {
     #[test]
     #[ignore = "needs installed voices; see the doc comment"]
     fn an_uninstalled_language_is_refused_not_substituted() {
-        let models_root = std::env::var("cnverc_TEST_MODELS").expect("cnverc_TEST_MODELS");
+        let models_root = std::env::var("CNVERC_TEST_MODELS").expect("CNVERC_TEST_MODELS");
         let engines = engines_from(&models_root);
         let message = match for_language(&engines, "ja") {
             Ok(engine) => panic!("substituted {} for Japanese", engine.dir_name),

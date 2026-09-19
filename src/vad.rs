@@ -327,12 +327,12 @@ mod tests {
     /// Needs only the model:
     ///
     /// ```bash
-    /// cnverc_TEST_VAD_MODEL=/abs/silero_vad.onnx     /// cargo test -- --ignored --nocapture silence
+    /// CNVERC_TEST_VAD_MODEL=/abs/silero_vad.onnx     /// cargo test -- --ignored --nocapture silence
     /// ```
     #[test]
     #[ignore = "needs the Silero model; see the doc comment"]
     fn silence_produces_no_segments() {
-        let model = std::env::var("cnverc_TEST_VAD_MODEL").expect("cnverc_TEST_VAD_MODEL");
+        let model = std::env::var("CNVERC_TEST_VAD_MODEL").expect("CNVERC_TEST_VAD_MODEL");
         let mut segmenter = Segmenter::new(&settings(&model)).expect("load the VAD");
 
         // Ten seconds of digital silence, then ten of quiet room noise.
@@ -378,15 +378,15 @@ mod tests {
     /// together, and history that has to be trimmed as it runs.
     ///
     /// ```bash
-    /// cnverc_TEST_VAD_MODEL=/abs/silero_vad.onnx \
-    /// cnverc_TEST_WAV=/abs/speech.wav \
+    /// CNVERC_TEST_VAD_MODEL=/abs/silero_vad.onnx \
+    /// CNVERC_TEST_WAV=/abs/speech.wav \
     /// cargo test --release -- --ignored --nocapture pre_roll
     /// ```
     #[test]
     #[ignore = "needs the Silero model and a recording; see the doc comment"]
     fn pre_roll_splices_exactly_and_never_overlaps() {
-        let model = std::env::var("cnverc_TEST_VAD_MODEL").expect("cnverc_TEST_VAD_MODEL");
-        let wav = std::env::var("cnverc_TEST_WAV").expect("cnverc_TEST_WAV");
+        let model = std::env::var("CNVERC_TEST_VAD_MODEL").expect("CNVERC_TEST_VAD_MODEL");
+        let wav = std::env::var("CNVERC_TEST_WAV").expect("CNVERC_TEST_WAV");
         let audio = crate::wav::read_16k_mono(Path::new(&wav)).expect("read the test wav");
 
         let mut segmenter = Segmenter::new(&settings(&model)).expect("load the VAD");
@@ -439,15 +439,15 @@ mod tests {
     /// timestamped where it really happened, not from zero.
     ///
     /// ```bash
-    /// cnverc_TEST_VAD_MODEL=/abs/silero_vad.onnx \
-    /// cnverc_TEST_WAV=/abs/speech.wav \
+    /// CNVERC_TEST_VAD_MODEL=/abs/silero_vad.onnx \
+    /// CNVERC_TEST_WAV=/abs/speech.wav \
     /// cargo test --release -- --ignored --nocapture timeline
     /// ```
     #[test]
     #[ignore = "needs the Silero model and a recording; see the doc comment"]
     fn a_reset_keeps_segments_on_the_capture_timeline() {
-        let model = std::env::var("cnverc_TEST_VAD_MODEL").expect("cnverc_TEST_VAD_MODEL");
-        let wav = std::env::var("cnverc_TEST_WAV").expect("cnverc_TEST_WAV");
+        let model = std::env::var("CNVERC_TEST_VAD_MODEL").expect("CNVERC_TEST_VAD_MODEL");
+        let wav = std::env::var("CNVERC_TEST_WAV").expect("CNVERC_TEST_WAV");
         let audio = crate::wav::read_16k_mono(Path::new(&wav)).expect("read the test wav");
 
         // Feed a third, discard a second of audio as the gate would, feed
@@ -540,15 +540,15 @@ mod tests {
     /// from the environment because neither belongs in the repository:
     ///
     /// ```bash
-    /// cnverc_TEST_VAD_MODEL=/abs/silero_vad.onnx \
-    /// cnverc_TEST_WAV=/abs/speech.wav \
+    /// CNVERC_TEST_VAD_MODEL=/abs/silero_vad.onnx \
+    /// CNVERC_TEST_WAV=/abs/speech.wav \
     /// cargo test -- --ignored --nocapture vad_cuts
     /// ```
     #[test]
     #[ignore = "needs the Silero model and a speech recording; see the doc comment"]
     fn vad_cuts_speech_out_of_a_recording() {
-        let model = std::env::var("cnverc_TEST_VAD_MODEL").expect("cnverc_TEST_VAD_MODEL");
-        let wav = std::env::var("cnverc_TEST_WAV").expect("cnverc_TEST_WAV");
+        let model = std::env::var("CNVERC_TEST_VAD_MODEL").expect("CNVERC_TEST_VAD_MODEL");
+        let wav = std::env::var("CNVERC_TEST_WAV").expect("CNVERC_TEST_WAV");
 
         let audio = crate::wav::read_16k_mono(Path::new(&wav)).expect("read the test wav");
         let total_ms = audio.len() as u64 * 1000 / SAMPLE_RATE as u64;

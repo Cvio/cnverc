@@ -564,12 +564,12 @@ mod tests {
     /// live session speak the system prompt aloud.
     ///
     /// ```bash
-    /// cnverc_TEST_GGUF=/abs/path/qwen3-0.6b-q4_k_m.gguf     /// cargo test --release -- --ignored --nocapture guards_
+    /// CNVERC_TEST_GGUF=/abs/path/qwen3-0.6b-q4_k_m.gguf     /// cargo test --release -- --ignored --nocapture guards_
     /// ```
     #[test]
     #[ignore = "needs the translation GGUF; see the doc comment"]
     fn guards_reject_what_is_not_a_translation() {
-        let path = std::env::var("cnverc_TEST_GGUF").expect("cnverc_TEST_GGUF");
+        let path = std::env::var("CNVERC_TEST_GGUF").expect("CNVERC_TEST_GGUF");
         let mut translator = LlamaTranslator::load(Path::new(&path)).expect("load");
 
         // Nonsense: whatever comes back must not reach a caption or a speaker.
@@ -634,13 +634,13 @@ mod tests {
     /// a translation is right is read from the output.
     ///
     /// ```bash
-    /// cnverc_TEST_GGUF=/abs/path/model.gguf \
+    /// CNVERC_TEST_GGUF=/abs/path/model.gguf \
     /// cargo test --release -- --ignored --nocapture bench_both_directions
     /// ```
     #[test]
     #[ignore = "needs a translation GGUF; see the doc comment"]
     fn bench_both_directions() {
-        let path = std::env::var("cnverc_TEST_GGUF").expect("cnverc_TEST_GGUF");
+        let path = std::env::var("CNVERC_TEST_GGUF").expect("CNVERC_TEST_GGUF");
         let mut translator = LlamaTranslator::load(Path::new(&path)).expect("load");
         println!("model: {path}");
 
@@ -688,13 +688,13 @@ mod tests {
     /// instead of translating:
     ///
     /// ```bash
-    /// cnverc_TEST_GGUF=/abs/path/qwen3-0.6b-q4_k_m.gguf \
+    /// CNVERC_TEST_GGUF=/abs/path/qwen3-0.6b-q4_k_m.gguf \
     /// cargo test --release -- --ignored --nocapture translates_
     /// ```
     #[test]
     #[ignore = "needs the translation GGUF; see the doc comment"]
     fn translates_spanish_to_english_without_answering() {
-        let path = std::env::var("cnverc_TEST_GGUF").expect("cnverc_TEST_GGUF");
+        let path = std::env::var("CNVERC_TEST_GGUF").expect("CNVERC_TEST_GGUF");
         let mut translator = LlamaTranslator::load(Path::new(&path)).expect("load");
 
         let cases = [

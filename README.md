@@ -10,7 +10,7 @@ expected and exits non-zero. See `CLAUDE.md` for the constraints in full, and `S
 the build specification.
 
 Local network sockets are a different matter and are used deliberately: paired mode (two
-machines, one cnvercation) is plain TCP to an address you type in, and works on a switch with
+machines, one conversation) is plain TCP to an address you type in, and works on a switch with
 no uplink and no DNS anywhere.
 
 ## Status
@@ -165,7 +165,7 @@ Two tests need files that are not in the repository — the VAD model, and a 16 
 recording of someone talking — so they are `#[ignore]`d by default:
 
 ```bash
-cnverc_TEST_VAD_MODEL=/abs/path/silero_vad.onnx cnverc_TEST_WAV=/abs/path/speech.wav cnverc_TEST_MODELS=/abs/path/models cnverc_TEST_WAV_ES=/abs/path/spanish-16k.wav cargo test --release -- --ignored --nocapture
+CNVERC_TEST_VAD_MODEL=/abs/path/silero_vad.onnx CNVERC_TEST_WAV=/abs/path/speech.wav CNVERC_TEST_MODELS=/abs/path/models CNVERC_TEST_WAV_ES=/abs/path/spanish-16k.wav cargo test --release -- --ignored --nocapture
 ```
 
 Both recordings must be 16 kHz mono: the pipeline resamples at the capture boundary and

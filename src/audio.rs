@@ -433,7 +433,7 @@ mod tests {
     }
 
     /// The capture boundary is the only place audio changes rate, so the
-    /// cnvercion itself is worth pinning down: a 1 kHz tone recorded at
+    /// conversion itself is worth pinning down: a 1 kHz tone recorded at
     /// 48 kHz must still be a 1 kHz tone after it.
     #[test]
     fn resampling_preserves_the_tone_and_the_duration() {

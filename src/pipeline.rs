@@ -58,7 +58,7 @@ const LEVEL_LOG: Duration = Duration::from_secs(5);
 const LEVEL_EVENT: Duration = Duration::from_millis(200);
 
 /// Transcripts queued for translation. Short on purpose: if the translator
-/// falls this far behind, the cnvercation has already moved on and saying so
+/// falls this far behind, the conversation has already moved on and saying so
 /// is better than growing a backlog.
 const TRANSLATION_QUEUE: usize = 4;
 
@@ -294,7 +294,7 @@ fn run(
 
     // No translator in comparison mode: with several transcripts of the same
     // utterance there is no single one to translate, and comparison is a
-    // recognizer harness (SPEC §12), not the cnvercation path.
+    // recognizer harness (SPEC §12), not the conversation path.
     let translation = if options.compare || asr.selected.is_none() {
         None
     } else {
@@ -959,7 +959,7 @@ impl Stage<'_> {
                 );
                 let _ = self.events.send(PipelineMsg::NotTranslated {
                     index: job.index,
-                    reason: "translation fell behind the cnvercation".to_string(),
+                    reason: "translation fell behind the conversation".to_string(),
                 });
             }
             Err(TrySendError::Disconnected(_)) => warn!("the translation thread has stopped"),
@@ -1205,15 +1205,15 @@ mod tests {
     /// three-sentence turn of real speech, for the same words.
     ///
     /// ```bash
-    /// cnverc_TEST_MODELS=/abs/path/models \
-    /// cnverc_TEST_TURN_WAVS="/abs/a.wav;/abs/b.wav;/abs/c.wav" \
+    /// CNVERC_TEST_MODELS=/abs/path/models \
+    /// CNVERC_TEST_TURN_WAVS="/abs/a.wav;/abs/b.wav;/abs/c.wav" \
     /// cargo test --release -- --ignored --nocapture multi_sentence
     /// ```
     #[test]
     #[ignore = "needs the models and Spanish recordings; see the doc comment"]
     fn a_multi_sentence_turn_is_one_utterance() {
-        let models_root = std::env::var("cnverc_TEST_MODELS").expect("cnverc_TEST_MODELS");
-        let wavs = std::env::var("cnverc_TEST_TURN_WAVS").expect("cnverc_TEST_TURN_WAVS");
+        let models_root = std::env::var("CNVERC_TEST_MODELS").expect("CNVERC_TEST_MODELS");
+        let wavs = std::env::var("CNVERC_TEST_TURN_WAVS").expect("CNVERC_TEST_TURN_WAVS");
         let root = Path::new(&models_root)
             .parent()
             .expect("parent")
@@ -1306,10 +1306,10 @@ mod tests {
     /// makes this exact and silent, as it did for the half-duplex gate.
     ///
     /// ```bash
-    /// cnverc_TEST_MODELS=/abs/path/models \
-    /// cnverc_TEST_WAV_ES=/abs/path/spanish-16k.wav \
-    /// cnverc_TEST_OUT_DEVICE="CABLE Input (VB-Audio Virtual Cable)" \
-    /// cnverc_TEST_IN_DEVICE="CABLE Output (VB-Audio Virtual Cable)" \
+    /// CNVERC_TEST_MODELS=/abs/path/models \
+    /// CNVERC_TEST_WAV_ES=/abs/path/spanish-16k.wav \
+    /// CNVERC_TEST_OUT_DEVICE="CABLE Input (VB-Audio Virtual Cable)" \
+    /// CNVERC_TEST_IN_DEVICE="CABLE Output (VB-Audio Virtual Cable)" \
     /// cargo test --release -- --ignored --nocapture closed_between_turns
     /// ```
     #[test]
@@ -1319,10 +1319,10 @@ mod tests {
         use crate::playback::Gate;
         use std::sync::mpsc::channel;
 
-        let models_root = std::env::var("cnverc_TEST_MODELS").expect("cnverc_TEST_MODELS");
-        let wav_path = std::env::var("cnverc_TEST_WAV_ES").expect("cnverc_TEST_WAV_ES");
-        let out_device = std::env::var("cnverc_TEST_OUT_DEVICE").expect("cnverc_TEST_OUT_DEVICE");
-        let in_device = std::env::var("cnverc_TEST_IN_DEVICE").expect("cnverc_TEST_IN_DEVICE");
+        let models_root = std::env::var("CNVERC_TEST_MODELS").expect("CNVERC_TEST_MODELS");
+        let wav_path = std::env::var("CNVERC_TEST_WAV_ES").expect("CNVERC_TEST_WAV_ES");
+        let out_device = std::env::var("CNVERC_TEST_OUT_DEVICE").expect("CNVERC_TEST_OUT_DEVICE");
+        let in_device = std::env::var("CNVERC_TEST_IN_DEVICE").expect("CNVERC_TEST_IN_DEVICE");
         let root = Path::new(&models_root)
             .parent()
             .expect("parent")
@@ -1420,15 +1420,15 @@ mod tests {
     /// device is involved, so this runs anywhere the models are installed.
     ///
     /// ```bash
-    /// cnverc_TEST_MODELS=/abs/path/models \
-    /// cnverc_TEST_WAV_ES=/abs/path/spanish-16k.wav \
+    /// CNVERC_TEST_MODELS=/abs/path/models \
+    /// CNVERC_TEST_WAV_ES=/abs/path/spanish-16k.wav \
     /// cargo test --release -- --ignored --nocapture end_to_end
     /// ```
     #[test]
     #[ignore = "needs every model and a Spanish recording; see the doc comment"]
     fn end_to_end_on_a_recording() {
-        let models_root = std::env::var("cnverc_TEST_MODELS").expect("cnverc_TEST_MODELS");
-        let wav_path = std::env::var("cnverc_TEST_WAV_ES").expect("cnverc_TEST_WAV_ES");
+        let models_root = std::env::var("CNVERC_TEST_MODELS").expect("CNVERC_TEST_MODELS");
+        let wav_path = std::env::var("CNVERC_TEST_WAV_ES").expect("CNVERC_TEST_WAV_ES");
         let root = Path::new(&models_root)
             .parent()
             .expect("models/ has a parent")

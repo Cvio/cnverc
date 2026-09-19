@@ -503,7 +503,7 @@ mod tests {
     /// must produce nothing at all.
     ///
     /// ```bash
-    /// cnverc_TEST_MODELS=/abs/path/models     /// cnverc_TEST_OUT_DEVICE="CABLE Input (VB-Audio Virtual Cable)"     /// cnverc_TEST_IN_DEVICE="CABLE Output (VB-Audio Virtual Cable)"     /// cargo test --release -- --ignored --nocapture hearing_itself
+    /// CNVERC_TEST_MODELS=/abs/path/models     /// CNVERC_TEST_OUT_DEVICE="CABLE Input (VB-Audio Virtual Cable)"     /// CNVERC_TEST_IN_DEVICE="CABLE Output (VB-Audio Virtual Cable)"     /// cargo test --release -- --ignored --nocapture hearing_itself
     /// ```
     #[test]
     #[ignore = "needs a loopback audio device and a voice; see the doc comment"]
@@ -515,9 +515,9 @@ mod tests {
         use std::path::{Path, PathBuf};
         use std::sync::mpsc::{sync_channel, RecvTimeoutError};
 
-        let models_root = std::env::var("cnverc_TEST_MODELS").expect("cnverc_TEST_MODELS");
-        let out_device = std::env::var("cnverc_TEST_OUT_DEVICE").expect("cnverc_TEST_OUT_DEVICE");
-        let in_device = std::env::var("cnverc_TEST_IN_DEVICE").expect("cnverc_TEST_IN_DEVICE");
+        let models_root = std::env::var("CNVERC_TEST_MODELS").expect("CNVERC_TEST_MODELS");
+        let out_device = std::env::var("CNVERC_TEST_OUT_DEVICE").expect("CNVERC_TEST_OUT_DEVICE");
+        let in_device = std::env::var("CNVERC_TEST_IN_DEVICE").expect("CNVERC_TEST_IN_DEVICE");
 
         let voices: Vec<crate::models::Engine> =
             models::discover(&Path::new(&models_root).join("tts"), Role::Tts)

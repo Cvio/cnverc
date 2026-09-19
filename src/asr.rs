@@ -290,15 +290,15 @@ mod tests {
     /// check. Needs a models tree and a 16 kHz mono recording:
     ///
     /// ```bash
-    /// cnverc_TEST_MODELS=/abs/path/models \
-    /// cnverc_TEST_WAV_ES=/abs/path/spanish.wav \
+    /// CNVERC_TEST_MODELS=/abs/path/models \
+    /// CNVERC_TEST_WAV_ES=/abs/path/spanish.wav \
     /// cargo test -- --ignored --nocapture both_engines
     /// ```
     #[test]
     #[ignore = "needs the ASR models and a recording; see the doc comment"]
     fn both_engines_transcribe_the_same_utterance() {
-        let models_root = std::env::var("cnverc_TEST_MODELS").expect("cnverc_TEST_MODELS");
-        let wav = std::env::var("cnverc_TEST_WAV_ES").expect("cnverc_TEST_WAV_ES");
+        let models_root = std::env::var("CNVERC_TEST_MODELS").expect("CNVERC_TEST_MODELS");
+        let wav = std::env::var("CNVERC_TEST_WAV_ES").expect("CNVERC_TEST_WAV_ES");
         let pcm = crate::wav::read_16k_mono(Path::new(&wav)).expect("read the recording");
 
         let entries = models::discover(&Path::new(&models_root).join("asr"), Role::Asr);

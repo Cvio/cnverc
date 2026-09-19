@@ -17,7 +17,7 @@ Pipeline: **microphone → VAD → ASR → translation → TTS → speakers**, w
 alongside.
 
 Two operating modes (§8) and an optional paired mode (§9) in which two instances of `cnverc`
-on two machines on a local network act as the two ends of a cnvercation.
+on two machines on a local network act as the two ends of a conversation.
 
 Primary language pair for development and testing: **Spanish ⇄ English**. The design must not
 hardcode that pair, but it also should not be generalized past what this spec requires.
@@ -299,9 +299,9 @@ the mode.
 
 ---
 
-## 9. Paired mode — two machines, one cnvercation
+## 9. Paired mode — two machines, one conversation
 
-Two instances of `cnverc` on a local network act as the two ends of a cnvercation. Person A
+Two instances of `cnverc` on a local network act as the two ends of a conversation. Person A
 speaks Spanish into laptop A; laptop B displays and speaks the English.
 
 ### What crosses the wire
@@ -556,7 +556,7 @@ focused widget.
 peer panel in the UI showing local interface addresses and their IPs, the firewall diagnostic,
 the continuous-mode headset warning. Discovery last, and only after manual entry works.
 *Check:* two laptops on an isolated switch with no internet hold a turn-based Spanish/English
-cnvercation; unplugging the WAN uplink changes nothing; pulling the cable mid-session
+conversation; unplugging the WAN uplink changes nothing; pulling the cable mid-session
 force-releases the floor and shows a disconnected state on both ends.
 
 **M8 — Streaming ASR.** `StreamAsr` against `OnlineRecognizer` with a streaming model. `Partial`

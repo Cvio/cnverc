@@ -98,6 +98,10 @@ Milestones 0–6 complete. M7 is built; its check on two real PCs is pending.
   Addresses are IP only: a typed hostname is refused, never resolved, because resolving could
   reach a public DNS server. A dead link is noticed by pings stopping, not by TCP.
 
+Linux (the user's `ubox`) builds and runs the full pipeline since 2026-09-19, using the shared
+sherpa-onnx build described under "Build note". Build there with `-j2`: a fully parallel
+build of llama.cpp ran the 10 GB machine out of memory.
+
 The check for M7 needs the second PC (the user's is Linux, which §3 calls a nice-to-have):
 two machines on an isolated switch, a turn-based Spanish/English conversation, the uplink
 unplugged changing nothing, and a pulled cable force-releasing the floor on both ends.
@@ -118,3 +122,12 @@ library is `/MT` and llama.cpp defaults to `/MD`; MSVC will not link both. Do no
 RuntimeLibrary mismatch by switching sherpa to the dynamic build — the static CRT is also what
 keeps the executable free of any Visual C++ redistributable dependency, which §2.6 requires.
 For the same reason `llama-cpp-2` is built without its default `openmp` feature.
+
+**Linux is the exception, and deliberately so.** On Linux sherpa-onnx is linked as a shared
+library (`Cargo.toml` splits the dependency by target, so Windows still gets the static build).
+The prebuilt static Linux archive's onnxruntime aborts with `free(): invalid pointer` as soon
+as a model session is created; sherpa-onnx's own `sherpa-onnx-offline` crashed the same way,
+so it is not cnverc's code. The build needs `SHERPA_ONNX_LIB_DIR` pointing at a sherpa-onnx
+v1.13.8 built with `BUILD_SHARED_LIBS=ON` against the system `libonnxruntime` (README, "Setting
+up on Linux"). The Windows rule above does not apply to Linux, and the Linux fix must never
+leak into the Windows build: keep Linux-only settings under Linux-only `cfg`/target sections.

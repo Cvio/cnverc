@@ -116,14 +116,19 @@ some libraries). Later builds are much faster.
 
 ✅ **Check:** the last line says `Finished`, and the file `target/release/cnverc.exe` exists.
 
-> **Building again without internet:** only the first build downloads anything: the speech
-> library, which it saves in `target/sherpa-onnx-prebuilt/`. If you ever delete `target/` and
-> need to rebuild with no internet, copy that folder somewhere safe first, then point the
-> build at the `lib` folder inside it before running `cargo build`:
+> **Optional, only for rebuilding without internet:** skip this unless you need it. Only the
+> first build downloads anything: the speech library, which it saves in
+> `target/sherpa-onnx-prebuilt/`. To rebuild with no internet, point the build at the `lib`
+> folder inside it before running `cargo build`:
 >
 > ```bash
-> export SHERPA_ONNX_LIB_DIR=/path/to/sherpa-onnx-v1.13.8-win-x64-static-MT-Release-lib/lib
+> export SHERPA_ONNX_LIB_DIR="$PWD/target/sherpa-onnx-prebuilt/sherpa-onnx-v1.13.8-win-x64-static-MT-Release-lib/lib"
 > ```
+>
+> If you're going to delete `target/`, copy `target/sherpa-onnx-prebuilt/` somewhere safe
+> first, and use that copy's path instead. If the build then fails saying
+> `SHERPA_ONNX_LIB_DIR does not exist`, the path is wrong: run `unset SHERPA_ONNX_LIB_DIR` and
+> build normally.
 
 > **If the build fails with "cmake not found" or similar:** run the `export PATH=...` line
 > again and rebuild. If your Build Tools are a different version, the `18` in that path will

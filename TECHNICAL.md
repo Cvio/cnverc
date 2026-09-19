@@ -11,6 +11,9 @@ Milestones 0–6 of 9 are complete, and Milestone 7 is built and waiting for its
 real PCs. Milestones are defined in `SPEC.md` §13 and built in order;
 each one's check must pass before the next starts.
 
+Windows is the primary platform. Linux builds and runs the full pipeline too, using a shared
+sherpa-onnx build; see "Linux: shared sherpa-onnx" under Building.
+
 | Milestone | What it added |
 |---|---|
 | M0 | Skeleton, path resolution, config load, model discovery, `--report` |
@@ -175,6 +178,52 @@ kernel32.dll  advapi32.dll  ole32.dll  oleaut32.dll  dbghelp.dll  setupapi.dll  
 Re-check with `dumpbin -dependents cnverc.exe` whenever a dependency is added. Don't fix a
 RuntimeLibrary mismatch by switching sherpa to its dynamic build.
 
+### Linux: shared sherpa-onnx
+
+Linux doesn't use the static build. The prebuilt `sherpa-onnx-v1.13.8-linux-x64-static-lib`
+archive bundles an onnxruntime (`1.28.2-glibc2_17`) that aborts with `free(): invalid pointer`
+the moment a model session is created, on Ubuntu 26.04 with GCC 15 and glibc 2.43. It isn't
+cnverc's code: sherpa-onnx's own `sherpa-onnx-offline`, built from source with the same bundled
+onnxruntime, crashed identically at "Creating recognizer", for Parakeet and Whisper alike. Built
+as a shared library against Ubuntu's `libonnxruntime` 1.23, every model loads and runs: Silero
+VAD, both recognizers and both Piper voices.
+
+How it's wired, all of it Linux-only so the Windows build is untouched:
+
+- `Cargo.toml` declares `sherpa-onnx` twice: the default (static) under
+  `cfg(not(target_os = "linux"))`, and `default-features = false, features = ["shared"]` under
+  `cfg(target_os = "linux")`. It must be split this way. `sherpa-onnx-sys` refuses to build
+  with both `static` and `shared` on, and adding `shared` on top of the default would turn on
+  both.
+- `SHERPA_ONNX_LIB_DIR` must point at the shared build's `lib/` (README, "Setting up on Linux").
+  Without it, the build script downloads the official `linux-x64-shared-lib` archive instead,
+  which hasn't been tested.
+- The build script copies `libsherpa-onnx-c-api.so` next to the executable, but a dependency's
+  `rustc-link-arg` never reaches the final binary, so the rpath it asks for is lost.
+  `.cargo/config.toml` adds `-Wl,-rpath,$ORIGIN` under `[target.x86_64-unknown-linux-gnu]` so
+  `cnverc` finds the library in its own folder.
+- The shared link asks for `-lonnxruntime`. If the `SHERPA_ONNX_LIB_DIR` folder still holds a
+  `libonnxruntime.a`, left over from an earlier static build of sherpa-onnx, the linker finds it
+  there before the system `.so` and links the crashing library again. Move it out.
+
+Check the result with:
+
+```bash
+ldd target/release/cnverc | grep -E "onnx|sherpa|not found"
+```
+
+`libsherpa-onnx-c-api.so` should resolve to `target/release/`, and `libonnxruntime.so.1.23` to
+`/usr/lib/x86_64-linux-gnu/`. `readelf -d target/release/cnverc | grep RUNPATH` should show
+`$ORIGIN`.
+
+This means the Linux build depends on the system `libonnxruntime` package, so it isn't
+copy-to-run the way the Windows build is. §3 makes Linux a nice-to-have, and the Milestone 9
+acceptance test is Windows-only. At startup, Ubuntu's onnxruntime prints one harmless line,
+`Schema error: ... TreeEnsembleClassifier ... already registered`.
+
+Build on a small machine with `-j2` (for both `cargo` and sherpa-onnx's `cmake --build`). A fully
+parallel build of llama.cpp and sherpa-onnx ran a 10 GB PC out of memory.
+
 ### Build-time internet
 
 The `sherpa-onnx` crate's build script downloads a matching prebuilt `-lib` archive from GitHub
@@ -183,9 +232,12 @@ internet. The binary never does. For offline rebuilds, keep the extracted archiv
 it:
 
 ```bash
-export SHERPA_ONNX_LIB_DIR=/path/to/sherpa-onnx-vX.Y.Z-win-x64-static/lib
+export SHERPA_ONNX_LIB_DIR="$PWD/target/sherpa-onnx-prebuilt/sherpa-onnx-v1.13.8-win-x64-static-MT-Release-lib/lib"
 cargo build --release
 ```
+
+Leave `SHERPA_ONNX_LIB_DIR` unset otherwise: if it names a folder that doesn't exist, the build
+fails. On Linux it's always set, to the shared build (above).
 
 On Windows, disable any Vulkan feature flag that appears in a dependency rather than debugging
 it: Vulkan-backed whisper builds have failed on this platform before.
@@ -237,6 +289,28 @@ else, and the test reader refuses to add a second resampling path. The Parakeet 
 ```bash
 ffmpeg -i es.wav -ar 16000 -ac 1 es-16k.wav
 ```
+
+### Testing without a person talking
+
+A Piper voice can supply the speech. This is how the Linux build was checked end to end
+without anyone at the microphone. Make a clip with sherpa-onnx's TTS program (from the shared
+build's `bin/`), then play it into a running `--listen` through the speakers:
+
+```bash
+V=target/release/models/tts/vits-piper-en_US-lessac-medium
+sherpa-onnx-offline-tts --vits-model=$V/en_US-lessac-medium.onnx --vits-tokens=$V/tokens.txt --vits-data-dir=$V/espeak-ng-data --output-filename=en.wav "Where is the train station?"
+```
+
+```bash
+./target/release/cnverc --listen --seconds 60 &
+sleep 30; aplay en.wav; wait
+```
+
+The model load takes about 20 s, which is why the clip plays after 30. Piper writes 22050 Hz
+(the `x_low` Spanish voice writes 16 kHz). `sherpa-onnx-offline` and cnverc's capture path both
+resample, but `sherpa-onnx-vad` and the `#[ignore]`d tests need 16 kHz, so convert first. The
+same clip also makes a quick check that sherpa-onnx itself works, with no cnverc involved:
+run it through `sherpa-onnx-offline` with the recognizer's files.
 
 ### Logs
 

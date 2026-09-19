@@ -26,7 +26,8 @@ as they are.
   run**. The check needs two PCs on an isolated switch: a turn-based Spanish/English
   conversation, then a pulled cable force-releasing the floor on both ends. The second PC is
   the user's Linux box, `ubox`.
-- **Linux is where things are stuck.** See section 5.
+- **Linux runs.** The Start crash is fixed with a Linux-only shared sherpa-onnx build; see
+  section 5. Pressing Start in the window on `ubox` is still to be confirmed by the user.
 - M8 (streaming ASR) and M9 (portability acceptance) haven't started. Don't work ahead of
   M7's check.
 
@@ -76,10 +77,9 @@ worked. Things learned the hard way:
   README until M7; this PC had it installed already, which hid the gap.
 - The README's "Building again without internet" note shows
   `export SHERPA_ONNX_LIB_DIR=/path/to/...` as a placeholder. The user ran it literally, and
-  the build failed looking for that path; `unset SHERPA_ONNX_LIB_DIR` fixed it. **That note
-  should be reworded**: make it clearly optional, and give the real folder,
-  `target/sherpa-onnx-prebuilt/<archive>/lib`. The user has asked for this and it isn't done
-  yet.
+  the build failed looking for that path; `unset SHERPA_ONNX_LIB_DIR` fixed it. The note
+  has since been reworded (2026-09-19): it's marked optional, gives the real folder, and says
+  to `unset` it if the path is wrong.
 - Everything links the **static CRT** (`.cargo/config.toml`), and `llama-cpp-2` is built
   without `openmp`. Both are required on Windows (see CLAUDE.md's build note). Don't change
   either to fix a Linux problem; use `[target.'cfg(target_os = "linux")'...]` sections if
@@ -95,62 +95,53 @@ worked. Things learned the hard way:
 - Two instances on one PC need separate folders and different `[peer].listen_addr` ports, and
   only one of them can use discovery (UDP 47801).
 
-## 5. The open problem: Linux crashes when Start is pressed
+## 5. Linux: the Start crash, found and fixed (2026-09-19)
 
-**Machine:** `ubox`, Ubuntu with Mesa 26 and an NVIDIA GT 1030 plus Intel UHD 630. The repo is
-at `~/Desktop/projects/cnverc`.
+**Machine:** `ubox`, Ubuntu 26.04 (GCC 15, glibc 2.43, 10 GB RAM), Mesa 26 with an NVIDIA
+GT 1030 and an Intel UHD 630. The repo is at `~/Desktop/projects/cnverc`.
 
-**What works:** it builds, `--report` passes, the window opens (on Wayland; wgpu picks Vulkan),
-and "Pair with another PC" is shown.
+**What it was:** pressing Start ended in `free(): invalid pointer` / `Aborted (core dumped)`.
+The handoff's two suspects were a clash between llama.cpp and sherpa-onnx, and paired mode.
+It was neither:
+- `--listen` (pairing forced off) crashed the same way, which ruled out paired mode.
+- sherpa-onnx's own `sherpa-onnx-offline`, built from source (no Rust, no llama.cpp), crashed
+  at "Creating recognizer" for Parakeet and Whisper alike, which ruled out cnverc.
+- The common factor was the **prebuilt static onnxruntime** (`1.28.2-glibc2_17`) that
+  sherpa-onnx bundles, both in the crate's prebuilt archive and in a from-source build.
 
-**What fails:** with pairing ticked, pressing Start closes the program:
+**The fix**, all Linux-only (the Windows build is unchanged; see TECHNICAL.md, "Linux: shared
+sherpa-onnx"):
+- sherpa-onnx v1.13.8 built from source with `BUILD_SHARED_LIBS=ON` against Ubuntu's
+  `libonnxruntime-dev` (1.23), installed to `~/sherpa-onnx/install`.
+- `Cargo.toml` splits `sherpa-onnx` by target: static elsewhere, `features = ["shared"]` on
+  Linux.
+- `.cargo/config.toml` adds a Linux-only `-Wl,-rpath,$ORIGIN`, because the crate's own rpath
+  never reaches the final binary.
+- Build with `export SHERPA_ONNX_LIB_DIR="$HOME/sherpa-onnx/install/lib"`, and `-j2`.
+- A stale static `libonnxruntime.a` in that `lib/` folder would be linked instead of the
+  system `.so`. It was moved to `lib/stale-static/`.
 
-```
-INFO cnverc::peer: paired mode: listening on port 47800 as "ubox"
-INFO cnverc::discovery: discovery: announcing "ubox" on UDP port 47801
-free(): invalid pointer
-Aborted (core dumped)
-```
+**Verified:** `ldd` shows the `.so` from `target/release/` and the system onnxruntime.
+`--report` is all `ok`. A 60 s `--listen` run, with Piper-generated clips played through the
+speakers, went capture → VAD → Parakeet → Qwen → Spanish voice → playback, then exited
+cleanly. `cargo test`: 107 passed, 14 ignored. fmt and clippy clean.
 
-It is a native (C/C++) abort, not a Rust panic. **Not yet known:** whether Start *without*
-pairing also crashes. The last two log lines come from the peer thread, but the pipeline
-thread starts loading the recognizer at the same moment. That is sherpa-onnx's C++ code, and
-this was its first run on Linux.
+**Not yet verified:** pressing Start in the window (no automated way to click it), both
+unpaired and with "Pair with another PC" ticked. The user is to try both.
 
-**Suspects, most likely first:**
-1. **Loading a model on Linux.** sherpa-onnx's prebuilt Linux static archive
-   (`sherpa-onnx-v1.13.8-linux-x64-static-lib`, with onnxruntime, espeak-ng and
-   piper_phonemize inside) and llama.cpp, compiled locally with Ubuntu's GCC, end up in one
-   binary. A clash between those C++ libraries, or a memory allocated by one and freed by the
-   other, gives exactly `free(): invalid pointer`. If so, one experiment is sherpa-onnx's
-   `shared` feature on Linux only; its build script supports `linux-x64-shared-lib`. Do it as
-   a Linux-only dependency override so Windows keeps the static build. A shared library also
-   has to ship next to the exe, which affects portability on Linux only.
-2. **Something in paired mode:** `if_addrs` (getifaddrs/freeifaddrs) in `peer::local_addresses`
-   and `discovery::broadcast_targets`, or `gethostname`. Less likely, but cheap to rule out.
+**Seen during the check, not yet looked at:** a Spanish clip was transcribed correctly by
+Parakeet but tagged `[en]`, so the echo guard rejected its "translation" and nothing was
+spoken. `target/release/cnverc.toml` on `ubox` uses Parakeet; the user chose Whisper on Windows.
+Don't change their config unasked.
 
-**Diagnose in this order:**
-1. `./target/release/cnverc --listen --seconds 10`. This loads every model with pairing
-   forced off. A crash here means model loading (suspect 1); a clean run means paired mode
-   (suspect 2).
-2. Get a backtrace from a debug build, which keeps its symbols; the release profile has
-   `strip = true`:
-   ```bash
-   sudo apt install gdb
-   cargo build
-   ln -s ../release/models target/debug/models
-   cp target/release/cnverc.toml target/debug/
-   gdb -batch -ex run -ex bt --args ./target/debug/cnverc
-   ```
-   Reproduce the crash, then read which library's frames call `free`.
-3. The `#[ignore]`d tests load each model on its own (VAD, recognizers, translator, voice).
-   Running them one at a time narrows it to one library. See `TECHNICAL.md`, "Tests that need
-   real audio".
+**Also on this machine:** a fully parallel build ran it out of memory and took Claude Code
+down with it. Use `-j2` for `cargo` and `CMAKE_BUILD_PARALLEL_LEVEL=2`.
 
 **Linux noise to ignore:** `ALSA lib pcm.c ... Unknown PCM pulse/jack/oss` is cpal probing
 ALSA plugins that aren't installed. It's harmless, unless no microphone or speaker shows up in
 the window, in which case install `pipewire-alsa` or `libasound2-plugins`.
-`sctk_adwaita: Ignoring unknown button type` is harmless too.
+`sctk_adwaita: Ignoring unknown button type` and onnxruntime's `Schema error: ...
+TreeEnsembleClassifier ... already registered` are harmless too.
 
 **Linux firewall for M7:** `sudo ufw allow 47800/tcp` and `sudo ufw allow 47801/udp`, if ufw
 is on.
@@ -184,8 +175,11 @@ is on.
 
 ## 8. Next steps
 
-1. Find and fix the Linux crash (section 5) without changing the Windows build.
-2. Reword the README's `SHERPA_ONNX_LIB_DIR` note (section 4).
-3. Run the M7 check between the Windows PC and `ubox`: README, "Talking between two PCs".
-4. When it passes, mark M7 complete in `CLAUDE.md` and `TECHNICAL.md`, commit, and wait for the
+1. The user presses Start on `ubox`, unpaired and then paired (section 5). If it holds,
+   commit the Linux build changes.
+2. Run the M7 check between the Windows PC and `ubox`: README, "Talking between two PCs".
+3. When it passes, mark M7 complete in `CLAUDE.md` and `TECHNICAL.md`, commit, and wait for the
    go-ahead on M8.
+4. Optional: the Spanish-tagged-`[en]` observation in section 5.
+
+Done on 2026-09-19: the Linux crash (section 5), and the README's `SHERPA_ONNX_LIB_DIR` note.

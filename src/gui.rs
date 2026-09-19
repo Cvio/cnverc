@@ -48,6 +48,10 @@ pub fn run(root: PathBuf, config: Config) -> Result<()> {
             .with_title("cnverc")
             .with_inner_size([1000.0, 680.0])
             .with_min_inner_size([720.0, 480.0]),
+        wgpu_options: eframe::egui_wgpu::WgpuConfiguration {
+            wgpu_setup: graphics_setup().into(),
+            ..Default::default()
+        },
         ..Default::default()
     };
     eframe::run_native(
@@ -56,6 +60,25 @@ pub fn run(root: PathBuf, config: Config) -> Result<()> {
         Box::new(move |_cc| Ok(Box::new(App::new(root, config)))),
     )
     .map_err(|e| anyhow!("the window could not be opened: {e}"))
+}
+
+/// Which graphics API draws the window.
+///
+/// On Windows, DirectX 12 only. Left to choose, wgpu tried Vulkan first, and
+/// merely asking the Vulkan loader what was installed logged errors about other
+/// software's stale registrations on every start. More to the point, DirectX 12
+/// is part of every Windows 10 and 11 installation, while a Vulkan driver may be
+/// missing or broken on a freshly imaged machine, which is exactly the machine
+/// SPEC §2.6 has to run on. (§3's caution about Vulkan on Windows points the
+/// same way.) Elsewhere wgpu chooses as it normally would.
+fn graphics_setup() -> eframe::egui_wgpu::WgpuSetupCreateNew {
+    #[allow(unused_mut)]
+    let mut setup = eframe::egui_wgpu::WgpuSetupCreateNew::without_display_handle();
+    #[cfg(windows)]
+    {
+        setup.instance_descriptor.backends = eframe::wgpu::Backends::DX12;
+    }
+    setup
 }
 
 // ---------------------------------------------------------------------------

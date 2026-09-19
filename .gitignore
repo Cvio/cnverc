@@ -8,6 +8,9 @@
 *.tar.gz
 *.zip
 
+# Model archives downloaded during setup (README step 6).
+/downloads/
+
 # Runtime output.
 /logs/
 

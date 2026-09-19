@@ -1,250 +1,282 @@
 # cnverc
 
-Offline speech-to-speech translation. Microphone → VAD → ASR → translation → TTS → speakers,
-with captions, running as a single folder you can copy to a machine that has never been
-online.
+cnverc is a live interpreter for two people who don't share a language. One person speaks
+Spanish into the microphone. cnverc writes down what they said, translates it into English,
+shows both on screen, and says the English out loud. It works the other way round too.
 
-`cnverc` **never touches the internet**. It does not download models, check for updates,
-phone home, or talk to any service. If a model file is missing it prints the absolute path it
-expected and exits non-zero. See `CLAUDE.md` for the constraints in full, and `SPEC.md` for
-the build specification.
+Everything happens on your own computer. cnverc **never uses the internet**: it doesn't
+download anything, check for updates or send anything anywhere. Once it's set up, you can
+unplug the network, or copy the whole folder to a PC that has never been online, and it still
+works.
 
-Local network sockets are a different matter and are used deliberately: paired mode (two
-machines, one conversation) is plain TCP to an address you type in, and works on a switch with
-no uplink and no DNS anywhere.
+Inside, it runs five steps in order:
 
-## Status
+1. **Listen.** Wait for someone to start talking, and cut the recording off when they stop.
+2. **Transcribe.** Turn the speech into text.
+3. **Translate.** Translate that text into the other language.
+4. **Speak.** Read the translation aloud.
+5. **Show.** Put both sentences on screen as captions.
 
-**Milestone 5 of 9.** Microphone to speakers, with a window: capture, Silero VAD, Parakeet
-or Whisper, translation with a GGUF model in process, and speech through a Piper voice — all
-offline. Milestones are listed in `SPEC.md` §13 and are built in order.
+Each step uses a model file that you download once during setup (step 6 below).
 
-Double-click `cnverc.exe`, or run it with no arguments, and the window opens. Everything is
-set from there — recognizer, languages, microphone and output, speech, half-duplex, and the
-recognizer comparison — and choices are saved back to `cnverc.toml` with its comments left
-alone. The command line remains for shells, logs and scripted checks:
+Technical details, design notes and the development workflow are in
+[TECHNICAL.md](TECHNICAL.md).
 
-```bash
-cnverc                       # open the window
-cnverc --report              # what models are installed
-cnverc --devices             # what microphones and outputs are available
-cnverc --listen              # listen, translate and speak, logging to the terminal
-cnverc --listen --wav        # also write each utterance to logs/segments/
-cnverc --listen --compare    # run every recognizer on each utterance, side by side
-cnverc --listen --seconds 20 # stop cleanly after 20 s of listening
-```
+---
 
-A console window opens alongside the main one for now, carrying the log. Hiding it is a
-packaging decision for Milestone 9.
+## Setting up on a new PC
 
-### On the translation model's size
+The setup has to be done on a PC **with** internet, because you download the tools and the
+models. The finished folder doesn't need internet. These steps are for Windows 10 or 11.
 
-The recommended model is **Qwen3 1.7B**. It started as 0.6B, which is smaller and faster but
-was not good enough: measured on the same twenty test sentences (the `bench_both_directions`
-test), the two compare like this.
+Allow about an hour, most of it spent waiting for downloads and the first build.
 
-| Model (Q4_K_M) | English→Spanish | Spanish→English | Per sentence (CPU) |
-|---|---|---|---|
-| Qwen3 0.6B | 1 of 10 correct; 7 handed back untranslated | 9 of 10 | ~0.35 s |
-| Qwen3 1.7B | 10 of 10 usable | 10 of 10 | ~0.9 s |
+### Step 1: Install Git
 
-The 0.6B fails by handing the source straight back, or occasionally by producing a confident
-wrong answer. No prompt wording fixed that; wording that stopped the echo produced wrong
-translations instead. cnverc refuses an echo rather than captioning and speaking untranslated
-text, but only a better model fixes a wrong answer.
+Download **Git for Windows** from <https://git-scm.com/download/win> and install it with the
+default options. It also installs **Git Bash**, the terminal every command below is typed into.
 
-To change model, put a different Qwen3 GGUF in `models/mt/` and move the old one out. Nothing
-else changes, because the filesystem is the index. It must be a Qwen3 model: the prompt is
-written for Qwen's chat format.
+✅ **Check:** open the Start menu, type `Git Bash`, and open it. A black window with a `$`
+prompt appears.
 
-`models/mt/` holds exactly one `.gguf`. There is no key in `cnverc.toml` naming it — §7 does
-not define one — so the filesystem is the index here too; two files is an error asking you to
-remove one rather than cnverc choosing for you.
+### Step 2: Install the Visual Studio Build Tools
 
-`--compare` exists because published word error rates are measured on read speech, not on your
-microphone and your accent (`SPEC.md` §12). It prints each engine's transcript with the wall
-clock time and the duration of the audio, always together: Whisper pads every utterance to a
-30-second window internally, so a 1-second utterance costs it about what a 20-second one does.
+cnverc is written in Rust, and parts of it are compiled with Microsoft's C++ compiler.
 
-## Layout
+1. Download **Build Tools for Visual Studio** from
+   <https://visualstudio.microsoft.com/downloads/>. It's under "Tools for Visual Studio", and
+   it's free.
+2. Run the installer. When it asks what to install, tick **Desktop development with C++**.
+3. In the list on the right, make sure **C++ CMake tools for Windows** is also ticked.
+4. Click **Install** and wait. It's several gigabytes.
 
-Everything resolves from the directory containing `cnverc.exe` — never from the working
-directory, never from `%APPDATA%`. Move the folder anywhere, including another drive, and
-nothing changes.
+Do this step before step 3: the Rust installer looks for these tools.
 
-```
-cnverc/
-  cnverc.exe
-  cnverc.toml
-  models/
-    vad/silero_vad.onnx
-    asr/<engine dir>/engine.toml + model files
-    mt/<translation>.gguf
-    tts/<voice dir>/engine.toml + model files
-  logs/
-```
+### Step 3: Install Rust
 
-Each ASR and TTS directory describes itself in an `engine.toml`. Adding a model means dropping
-a folder in and restarting: there is no registry, no cache, and no download UI. A directory
-without an `engine.toml` is skipped with a warning; a directory whose `engine.toml` points at
-a file that is not there is listed but **disabled**, with the missing filename on screen.
+Download `rustup-init.exe` from <https://rustup.rs> and run it. When it asks, press **Enter**
+to accept the default installation.
 
-## Building
+Then **close Git Bash and open it again**, so it can find Rust.
+
+✅ **Check:** in Git Bash, type:
 
 ```bash
-cargo build --release
+cargo --version
 ```
 
-Rust stable, 2021 edition. There is no JavaScript toolchain, no `package.json`, and no
-webview; the GUI (from Milestone 5) is native `egui` compiled into the binary.
+It should print `cargo 1.95` or a later version. If the number is lower, update Rust with:
 
-**Build prerequisites on Windows:** MSVC (Visual Studio Build Tools) and **cmake**, because
-`llama-cpp-2` compiles llama.cpp from source. Build Tools ships a cmake that is not on `PATH`
-by default; either install cmake separately or add the bundled one for the build:
+```bash
+rustup update
+```
+
+### Step 4: Get the code
+
+In Git Bash, move to the folder you want cnverc in, then download it. For example:
+
+```bash
+cd /d/projects
+```
+
+```bash
+git clone https://github.com/Cvio/cnverc.git
+```
+
+```bash
+cd cnverc
+```
+
+Every command after this one is run from inside this `cnverc` folder.
+
+### Step 5: Build it
+
+Git Bash can't find the CMake that came with the Build Tools on its own, so tell it where
+CMake is. **You need to do this every time you open a new Git Bash window to build:**
 
 ```bash
 export PATH="$PATH:/c/Program Files (x86)/Microsoft Visual Studio/18/BuildTools/Common7/IDE/CommonExtensions/Microsoft/CMake/CMake/bin"
 ```
 
-### Everything links against the static CRT
-
-`.cargo/config.toml` sets `LLAMA_STATIC_CRT`, `CMAKE_MSVC_RUNTIME_LIBRARY` and
-`-C target-feature=+crt-static`. This is not a preference. sherpa-onnx ships its prebuilt
-static library built against the static CRT, llama.cpp's cmake build defaults to the dynamic
-one, and MSVC refuses to link the two together:
-
-```
-error LNK2038: mismatch detected for 'RuntimeLibrary': value 'MT_StaticRelease'
-doesn't match value 'MD_DynamicRelease'
-```
-
-Matching everything to the static CRT is also what §2.6 needs: the executable then depends on
-no Visual C++ redistributable. `llama-cpp-2`'s default `openmp` feature is off for the same
-reason — it links `VCOMP140.DLL`, which a freshly imaged machine may not have. The result
-depends on Windows system DLLs only:
-
-```
-kernel32.dll  advapi32.dll  ole32.dll  oleaut32.dll  dbghelp.dll  setupapi.dll  dxgi.dll  ntdll.dll
-```
-
-Worth re-checking with `dumpbin -dependents cnverc.exe` whenever a dependency is added.
-
-### Build-time internet caveat (applies from Milestone 1)
-
-The `sherpa-onnx` crate's build script downloads a matching prebuilt `-lib` archive from
-GitHub releases unless `SHERPA_ONNX_LIB_DIR` is set. **The first build on a new development
-machine therefore needs internet**, even though the resulting binary never does. For offline
-rebuilds, keep the extracted archive and point at it:
+Now build:
 
 ```bash
-export SHERPA_ONNX_LIB_DIR=/path/to/sherpa-onnx-vX.Y.Z-win-x64-static/lib
 cargo build --release
 ```
 
-On Windows, disable any Vulkan feature flag that appears in a dependency rather than debugging
-it — Vulkan-backed whisper builds have failed on this platform before.
+The first build takes a while, often 10 to 20 minutes, and it needs internet (it downloads
+some libraries). Later builds are much faster.
 
-### Running during development
+✅ **Check:** the last line says `Finished`, and the file `target/release/cnverc.exe` exists.
 
-`cnverc` looks for `models/` and `cnverc.toml` next to the executable, which during
-development means `target/debug/`. Copy them once:
+> **If the build fails with "cmake not found" or similar:** run the `export PATH=...` line
+> again and rebuild. If your Build Tools are a different version, the `18` in that path will
+> be different; look inside `C:\Program Files (x86)\Microsoft Visual Studio\` to see which
+> number you have.
 
-```bash
-cp -r models cnverc.toml target/debug/
-```
+### Step 6: Download the models
 
-Checks:
-
-```bash
-cargo fmt --check
-cargo clippy --all-targets -- -D warnings
-cargo test
-```
-
-Two tests need files that are not in the repository — the VAD model, and a 16 kHz mono
-recording of someone talking — so they are `#[ignore]`d by default:
+cnverc looks for everything in the folder `cnverc.exe` is in, which is `target/release/`.
+First copy the settings file and the empty model folders there:
 
 ```bash
-CNVERC_TEST_VAD_MODEL=/abs/path/silero_vad.onnx CNVERC_TEST_WAV=/abs/path/speech.wav CNVERC_TEST_MODELS=/abs/path/models CNVERC_TEST_WAV_ES=/abs/path/spanish-16k.wav cargo test --release -- --ignored --nocapture
+cp -r models cnverc.toml target/release/
 ```
 
-Both recordings must be 16 kHz mono: the pipeline resamples at the capture boundary and
-nowhere else, and the test reader refuses to introduce a second resampling path. The Parakeet
-archive ships `test_wavs/es.wav`, which is 22050 Hz — convert it once with
-`ffmpeg -i es.wav -ar 16000 -ac 1 es-16k.wav`.
+```bash
+mkdir -p target/release/models/vad target/release/models/mt downloads
+```
 
-## Models
+Now download each model. There are six, about 2.3 GB in total. Paste each block into Git Bash
+and wait for it to finish before pasting the next.
 
-`cnverc` does not fetch any of these. Download them on a machine that has internet, extract
-them into the layout above, and copy the folder across. The application never uses the URLs
-below — they are here for you, not for it.
+**Voice detector.** It notices when someone starts and stops talking.
 
-Nearly everything comes from the sherpa-onnx model releases, which are the authoritative
-listings. Asset filenames change between releases, so take the exact name from the release
-page rather than assuming the one quoted here:
+```bash
+curl -L -o target/release/models/vad/silero_vad.onnx https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/silero_vad.onnx
+```
 
-- ASR: <https://github.com/k2-fsa/sherpa-onnx/releases/tag/asr-models>
-- TTS: <https://github.com/k2-fsa/sherpa-onnx/releases/tag/tts-models>
+**Translator** (1.1 GB). It must be saved under the lower-case name shown here.
 
-| What | Where it goes | Source |
-|---|---|---|
-| Silero VAD | `models/vad/silero_vad.onnx` | `silero_vad.onnx` from <https://github.com/snakers4/silero-vad> (`files/silero_vad.onnx`), or the copy in the sherpa-onnx VAD release assets |
-| Parakeet TDT 0.6B v3, int8 | `models/asr/parakeet-tdt-0.6b-v3-int8/` | `sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8.tar.bz2` (487 MB) from the ASR release listing |
-| Whisper large-v3-turbo, int8 | `models/asr/whisper-large-v3-turbo/` | `sherpa-onnx-whisper-turbo.tar.bz2` (564 MB) from the ASR release listing — the release calls it "turbo", and the files inside are named `turbo-*` |
-| Qwen3 1.7B, Q4_K_M | `models/mt/qwen3-1.7b-q4_k_m.gguf` | `Qwen3-1.7B-Q4_K_M.gguf` (1.1 GB) from <https://huggingface.co/unsloth/Qwen3-1.7B-GGUF>, saved under the lower-case name shown. Qwen's own GGUF repositories publish only Q8_0. The smaller `Qwen3-0.6B-Q4_K_M.gguf` (397 MB, <https://huggingface.co/unsloth/Qwen3-0.6B-GGUF>) also works but translates English→Spanish poorly; see above |
-| English Piper voice | `models/tts/vits-piper-en_US-lessac-medium/` | `vits-piper-en_US-lessac-medium.tar.bz2` (64 MB) from the TTS release listing |
-| Spanish Piper voice | `models/tts/vits-piper-es_ES-carlfm-x_low/` | `vits-piper-es_ES-carlfm-x_low.tar.bz2` (25 MB) from the TTS release listing |
+```bash
+curl -L -o target/release/models/mt/qwen3-1.7b-q4_k_m.gguf https://huggingface.co/unsloth/Qwen3-1.7B-GGUF/resolve/main/Qwen3-1.7B-Q4_K_M.gguf
+```
 
-A voice is chosen by **language**, not by a setting: cnverc speaks with the installed voice
-that declares `[languages].target`. Install a voice for whichever language you translate into —
-for Spanish→English that is the English one. Piper voices also need their `espeak-ng-data`
-directory, which the archive contains and `engine.toml` names with `data_dir`, because a
-directory cannot be declared under `[files]`.
+**Speech recognizer: Whisper** (564 MB). It turns speech into text.
 
-Extract each archive so the model files sit **directly** in the directory named above, beside
-its `engine.toml` — not in a nested folder from the archive. Keep the published filenames. If
-the names in an archive differ from what the shipped `engine.toml` declares, edit the
-`engine.toml`; do not rename the model files.
+```bash
+curl -L -o downloads/whisper.tar.bz2 https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-whisper-turbo.tar.bz2
+tar -xjf downloads/whisper.tar.bz2 -C downloads
+cp downloads/sherpa-onnx-whisper-turbo/turbo-encoder.int8.onnx downloads/sherpa-onnx-whisper-turbo/turbo-decoder.int8.onnx downloads/sherpa-onnx-whisper-turbo/turbo-tokens.txt target/release/models/asr/whisper-large-v3-turbo/
+```
 
-The `engine.toml` files in this repository are committed; the weights are not. Run the binary
-after extracting and read the table: it names every file it looked for and where.
+**Speech recognizer: Parakeet** (487 MB). This is a second recognizer, so you can choose
+between them.
 
-All four models are expected to be resident simultaneously and to fit in 8GB of VRAM alongside
-a desktop session.
+```bash
+curl -L -o downloads/parakeet.tar.bz2 https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8.tar.bz2
+tar -xjf downloads/parakeet.tar.bz2 -C downloads
+cp downloads/sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8/{encoder.int8.onnx,decoder.int8.onnx,joiner.int8.onnx,tokens.txt} target/release/models/asr/parakeet-tdt-0.6b-v3-int8/
+```
 
-## Paired mode networking
+**English voice** (64 MB). This voice speaks English translations.
 
-Two machines each run their own complete pipeline. **Only text crosses the wire** — never
-audio, never models. Laptop A captures Spanish, transcribes and translates locally, and sends
-the English text; laptop B displays it and speaks it in its own voice. An utterance costs a few
-hundred bytes, so the link can be terrible and it still works.
+```bash
+curl -L -o downloads/voice-en.tar.bz2 https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/vits-piper-en_US-lessac-medium.tar.bz2
+tar -xjf downloads/voice-en.tar.bz2 -C target/release/models/tts
+```
 
-Any transport that presents to the OS as an IP interface works, and the socket code is
-identical across all of them:
+**Spanish voice** (25 MB). This voice speaks Spanish translations.
 
-| Transport | Works | Notes |
-|---|---|---|
-| Unmanaged Ethernet switch | Yes | No uplink needed |
-| Router with the WAN unplugged | Yes | Gives you DHCP, which is convenient |
-| Ethernet cable laptop-to-laptop | Yes | No crossover cable needed |
-| Wi-Fi hotspot from one laptop | Yes | No upstream required |
-| Existing Wi-Fi LAN | Yes | Guest-network client isolation will block it |
-| Thunderbolt / USB4 networking | Yes | Virtual Ethernet adapter; fastest option |
-| USB bridge/transfer cable | Yes | Presents as a NIC to each side |
-| Two USB-C-to-Ethernet dongles | Yes | Ordinary cable between them |
-| **Plain USB-C cable between two laptops** | **No** | Both ends are USB hosts; there is no network |
+```bash
+curl -L -o downloads/voice-es.tar.bz2 https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/vits-piper-es_ES-carlfm-x_low.tar.bz2
+tar -xjf downloads/voice-es.tar.bz2 -C target/release/models/tts
+```
 
-**Addressing.** A dumb switch or a direct cable means no DHCP, so Windows falls back to
-link-local addressing (169.254.x.x) after roughly thirty seconds. It works, but the addresses
-are ugly and can change between sessions. For a rig you use repeatedly, set static IPs on that
-interface once — 192.168.50.1 and 192.168.50.2 — and forget about it.
+When all six are done, you can delete the `downloads` folder. Nothing uses it any more.
 
-**Firewall.** A cable or uplink-less switch produces a network Windows cannot identify, and it
-is frequently classified as **Public**, which blocks inbound connections. The listener binds,
-the peer connects to nothing, and no useful error appears. Set that interface's network
-profile to Private. From Milestone 7, `cnverc` detects the bound-but-never-accepted state and
-says so specifically rather than showing a generic timeout.
+### Step 7: Check that everything is in place
 
-## Licence
+```bash
+./target/release/cnverc.exe --report
+```
 
-Unpublished. Model files carry their own licences; check each one.
+This lists every model cnverc can find, with the full path of each file it looked for.
+
+- Every file should have a **`[+]`** next to it. A **`[!]`** means that file is missing.
+- Every recognizer and voice should say **`ok`**. **`DISABLED - missing: ...`** names the file
+  it couldn't find.
+
+To fix a missing file, put it at the path shown, spelled exactly the same way, and run the
+report again.
+
+### Step 8: Run it
+
+Double-click `target/release/cnverc.exe` in File Explorer, or run it from Git Bash:
+
+```bash
+./target/release/cnverc.exe
+```
+
+The first time it opens, choose your microphone and speakers in the window. Your choices are
+saved in `cnverc.toml`, next to the exe, so you only do this once.
+
+---
+
+## Using cnverc
+
+On the left side of the window you choose:
+
+- **Languages:** who is speaking which language. Swap them to translate the other way.
+- **Recognizer:** Whisper or Parakeet. Try both and keep whichever hears your voice better.
+- **Microphone and output:** which devices to use.
+- **Mode:**
+  - **Take turns:** press **Space** to start talking and again when you've finished. A large
+    banner shows **READY**, **RECORDING** or **PROCESSING**. If you prefer, choose **Hold
+    Space while speaking** instead: hold the key down while you talk and let go when you're
+    done.
+  - **Listen continuously:** cnverc listens all the time and translates each time you pause.
+- **Speak translations:** untick this to see captions only, with no voice.
+- **Mute the microphone while speaking:** leave this on when using speakers, so cnverc doesn't
+  hear its own voice and translate it again. Turn it off only if you're wearing headphones.
+
+A second black window opens behind the main one. It's the log, and you can ignore it.
+
+### Command-line options
+
+These are optional and mostly useful for troubleshooting:
+
+```bash
+cnverc --report              # which models are installed, and where it looked
+cnverc --devices             # which microphones and speakers it can see
+cnverc --listen              # listen and translate in the terminal, no window
+cnverc --listen --seconds 20 # the same, stopping after 20 seconds
+```
+
+---
+
+## Moving it to a PC with no internet
+
+Only the PC you build on needs internet. To run cnverc on any other Windows PC, copy these from
+`target/release/`:
+
+```
+cnverc.exe
+cnverc.toml
+models/
+```
+
+Put them in one folder anywhere, for example on a USB stick, the desktop or another drive,
+and double-click `cnverc.exe`. Nothing needs installing on that PC.
+
+---
+
+## The models
+
+Every model lives in its own folder under `models/`, keeping the name it was published with.
+To see what a file is, look at the folder it's in.
+
+| Job | Model used | Folder | Where it comes from |
+|---|---|---|---|
+| Notice speech | Silero VAD | `models/vad/` | [sherpa-onnx releases](https://github.com/k2-fsa/sherpa-onnx/releases/tag/asr-models) (`silero_vad.onnx`), or [silero-vad](https://github.com/snakers4/silero-vad) |
+| Speech → text | Whisper large-v3-turbo (int8) | `models/asr/whisper-large-v3-turbo/` | [sherpa-onnx ASR releases](https://github.com/k2-fsa/sherpa-onnx/releases/tag/asr-models) (`sherpa-onnx-whisper-turbo.tar.bz2`) |
+| Speech → text | NVIDIA Parakeet TDT 0.6B v3 (int8) | `models/asr/parakeet-tdt-0.6b-v3-int8/` | [sherpa-onnx ASR releases](https://github.com/k2-fsa/sherpa-onnx/releases/tag/asr-models) (`sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8.tar.bz2`) |
+| Translate | Qwen3 1.7B (Q4_K_M) | `models/mt/` | [unsloth/Qwen3-1.7B-GGUF](https://huggingface.co/unsloth/Qwen3-1.7B-GGUF) (`Qwen3-1.7B-Q4_K_M.gguf`) |
+| Speak English | Piper en_US lessac (medium) | `models/tts/vits-piper-en_US-lessac-medium/` | [sherpa-onnx TTS releases](https://github.com/k2-fsa/sherpa-onnx/releases/tag/tts-models) (`vits-piper-en_US-lessac-medium.tar.bz2`) |
+| Speak Spanish | Piper es_ES carlfm (x_low) | `models/tts/vits-piper-es_ES-carlfm-x_low/` | [sherpa-onnx TTS releases](https://github.com/k2-fsa/sherpa-onnx/releases/tag/tts-models) (`vits-piper-es_ES-carlfm-x_low.tar.bz2`) |
+
+Each recognizer and voice folder has a small `engine.toml` that comes with the code. It tells
+cnverc what the model is and which files belong to it. The model files themselves are
+downloaded separately and are never stored in the repository.
+
+**Swapping models:**
+
+- **Translator:** `models/mt/` must hold exactly **one** `.gguf` file, and it must be a
+  **Qwen3** model. To try a different size, move the old file out and put the new one in.
+- **Voices:** cnverc picks the voice that matches the language it's translating *into*. To
+  speak another language, add a Piper voice for it, with its own folder and `engine.toml`.
+- **Anything else:** a folder with no `engine.toml` is skipped. If a file named in the
+  `engine.toml` is missing, that model shows as disabled in the report, with the missing
+  file's name.
+
+Model files come with their own licences; check each one before you redistribute it.

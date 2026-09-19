@@ -316,8 +316,12 @@ pub struct KeyEdges {
 /// A focused egui widget treats Space as a click by looking for it among the
 /// frame's key events. Removing those events before any widget runs is what
 /// stops the turn key from also pressing whichever button has focus (SPEC §8).
-/// The space the bar would type is removed too. Key-repeat presses, which a
-/// held key produces many of, are not new presses.
+/// The space the bar would type is removed too.
+///
+/// `keys_down` is deliberately left alone. egui decides whether a press is a
+/// key-repeat by whether the key is already in it, so removing the key there
+/// made every auto-repeat of a held key look like a fresh press, and in toggle
+/// style a held Space flipped a turn on and off several times a second.
 pub fn take_turn_key(input: &mut egui::InputState, key: egui::Key) -> KeyEdges {
     let mut edges = KeyEdges::default();
     input.events.retain(|event| match event {
@@ -338,8 +342,43 @@ pub fn take_turn_key(input: &mut egui::InputState, key: egui::Key) -> KeyEdges {
         egui::Event::Text(text) if key == egui::Key::Space && text == " " => false,
         _ => true,
     });
-    input.keys_down.remove(&key);
     edges
+}
+
+/// Whether the turn key is down, kept by cnverc itself, so that a held key is
+/// one press however its repeats arrive. egui's own repeat marking is not
+/// relied on alone: depending on it is how the flapping above happened.
+#[derive(Debug, Default)]
+pub struct TurnKey {
+    down: bool,
+}
+
+impl TurnKey {
+    /// Reduce this frame's raw key activity to real presses and releases.
+    ///
+    /// A window that loses focus never hears the key come up, so losing focus
+    /// with the key down counts as its release.
+    pub fn update(&mut self, raw: KeyEdges, window_focused: bool) -> KeyEdges {
+        if !window_focused {
+            let released = self.down;
+            self.down = false;
+            return KeyEdges {
+                pressed: false,
+                released,
+            };
+        }
+        let pressed = raw.pressed && !self.down;
+        if raw.pressed {
+            self.down = true;
+        }
+        if raw.released {
+            self.down = false;
+        }
+        KeyEdges {
+            pressed,
+            released: raw.released,
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -365,6 +404,8 @@ struct App {
     notice: Option<String>,
     /// The key that takes a turn: `[mode].turn_key`.
     turn_key: egui::Key,
+    /// Whether that key is down.
+    turn_key_state: TurnKey,
     /// In hold style, whether the key is down. Tracked here rather than read
     /// from the turn state, so a tap shorter than the pipeline's reply still
     /// ends the turn it began.
@@ -387,6 +428,7 @@ impl App {
             events_tx,
             notice: None,
             turn_key: egui::Key::Space,
+            turn_key_state: TurnKey::default(),
             holding: false,
             root,
             config,
@@ -1006,9 +1048,10 @@ impl eframe::App for App {
         // window is in, so a press meant as a turn never lands on the focused
         // button instead.
         let key = self.turn_key;
-        let (edges, focused) = ui
+        let (raw, focused) = ui
             .ctx()
             .input_mut(|input| (take_turn_key(input, key), input.focused));
+        let edges = self.turn_key_state.update(raw, focused);
         self.handle_turn_key(edges, focused);
 
         egui::Panel::top("top").show(ui, |ui| {
@@ -1274,7 +1317,79 @@ mod tests {
             "a button would see Space"
         );
         assert!(input.events.is_empty(), "a space would be typed");
-        assert!(!input.keys_down.contains(&egui::Key::Space));
+        // Left in place, so egui can still tell the next repeat is a repeat.
+        assert!(input.keys_down.contains(&egui::Key::Space));
+    }
+
+    #[test]
+    fn holding_the_key_is_one_press_however_the_repeats_arrive() {
+        // What a held key looked like with the bug: a fresh-looking press
+        // every frame, never a release. It must start one turn, not flap.
+        let mut key = TurnKey::default();
+        let raw = KeyEdges {
+            pressed: true,
+            released: false,
+        };
+        assert!(key.update(raw, true).pressed, "the first press counts");
+        for _ in 0..30 {
+            assert!(
+                !key.update(raw, true).pressed,
+                "a repeat counted as a press"
+            );
+        }
+        let up = key.update(
+            KeyEdges {
+                pressed: false,
+                released: true,
+            },
+            true,
+        );
+        assert!(up.released);
+        assert!(
+            key.update(raw, true).pressed,
+            "a new press after release counts"
+        );
+    }
+
+    #[test]
+    fn losing_focus_with_the_key_down_releases_it() {
+        let mut key = TurnKey::default();
+        key.update(
+            KeyEdges {
+                pressed: true,
+                released: false,
+            },
+            true,
+        );
+        let edges = key.update(KeyEdges::default(), false);
+        assert!(edges.released, "the release would never arrive");
+        assert!(
+            !key.update(KeyEdges::default(), false).released,
+            "released once"
+        );
+    }
+
+    #[test]
+    fn a_tap_inside_one_frame_is_a_press_and_a_release() {
+        let mut key = TurnKey::default();
+        let edges = key.update(
+            KeyEdges {
+                pressed: true,
+                released: true,
+            },
+            true,
+        );
+        assert!(edges.pressed && edges.released);
+        assert!(
+            key.update(
+                KeyEdges {
+                    pressed: true,
+                    released: false
+                },
+                true
+            )
+            .pressed
+        );
     }
 
     #[test]

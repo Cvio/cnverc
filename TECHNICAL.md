@@ -200,7 +200,7 @@ How it's wired, all of it Linux-only so the Windows build is untouched:
   which hasn't been tested.
 - The build script copies `libsherpa-onnx-c-api.so` next to the executable, but a dependency's
   `rustc-link-arg` never reaches the final binary, so the rpath it asks for is lost.
-  `.cargo/config.toml` adds `-Wl,-rpath,$ORIGIN` under `[target.x86_64-unknown-linux-gnu]` so
+  `.cargo/config.toml` adds `-Wl,-rpath,$ORIGIN` under `[target.'cfg(target_os = "linux")']` so
   `cnverc` finds the library in its own folder.
 - The shared link asks for `-lonnxruntime`. If the `SHERPA_ONNX_LIB_DIR` folder still holds a
   `libonnxruntime.a`, left over from an earlier static build of sherpa-onnx, the linker finds it
@@ -220,6 +220,23 @@ This means the Linux build depends on the system `libonnxruntime` package, so it
 copy-to-run the way the Windows build is. §3 makes Linux a nice-to-have, and the Milestone 9
 acceptance test is Windows-only. At startup, Ubuntu's onnxruntime prints one harmless line,
 `Schema error: ... TreeEnsembleClassifier ... already registered`.
+
+**Distributions without an onnxruntime package.** Ubuntu 26.04 has `libonnxruntime-dev` 1.23.
+Ubuntu 24.04 LTS and Fedora don't package onnxruntime at all, which is why the README's Fedora
+line can't name it. On such a machine sherpa-onnx's cmake falls back to downloading the same
+static `1.28.2-glibc2_17` build that crashes, **the configure and build both succeed**, and the
+failure only appears when a model session is created. That is why the README's Linux step 3
+asks you to check the configure output for `location_onnxruntime_lib: /usr/lib/...` and to stop
+if it says `Downloading pre-compiled onnxruntime` instead. Without a distribution package the
+options are to build onnxruntime from source, or to try sherpa-onnx's own
+`linux-x64-shared-lib` release archive, which bundles a matching onnxruntime and would remove
+the distribution dependency entirely — untested here, and the obvious next experiment if Linux
+is to be supported properly.
+
+**Version skew is untested.** The pairing verified here is sherpa-onnx 1.13.8 (released against
+onnxruntime 1.28) with Ubuntu's 1.23. An older packaged onnxruntime — Debian trixie ships
+roughly 1.16 — may fail to compile, or compile and then fail on an operator used by the Whisper
+or Parakeet graphs. Nobody has tried it.
 
 Build on a small machine with `-j2` (for both `cargo` and sherpa-onnx's `cmake --build`). A fully
 parallel build of llama.cpp and sherpa-onnx ran a 10 GB PC out of memory.
@@ -247,14 +264,21 @@ compiled into the binary.
 
 ## Development workflow
 
-During development cnverc runs from `target/debug/`, so copy the models and config there once:
+During development cnverc runs from `target/debug/`, so copy the models and config there once,
+then point the download script at the same folder:
 
 ```bash
 cp -r models cnverc.toml target/debug/
 ```
 
-The model files themselves go in the same places as the README's setup steps, under
-`target/debug/models/` instead of `target/release/models/`.
+```bash
+./setup-models.sh target/debug
+```
+
+`setup-models.sh` takes the folder the executable is in and defaults to `target/release`. It
+skips anything already present, so it is safe to re-run, and it is the only place the model
+URLs are written down: the README's model table names the archives but does not repeat the
+commands.
 
 Before every commit:
 

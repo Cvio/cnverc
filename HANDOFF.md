@@ -129,10 +129,12 @@ cleanly. `cargo test`: 107 passed, 14 ignored. fmt and clippy clean.
 **Not yet verified:** pressing Start in the window (no automated way to click it), both
 unpaired and with "Pair with another PC" ticked. The user is to try both.
 
-**Seen during the check, not yet looked at:** a Spanish clip was transcribed correctly by
-Parakeet but tagged `[en]`, so the echo guard rejected its "translation" and nothing was
-spoken. `target/release/cnverc.toml` on `ubox` uses Parakeet; the user chose Whisper on Windows.
-Don't change their config unasked.
+**A log line that looks like a bug and isn't:** a Spanish clip was transcribed correctly by
+Parakeet but captioned `[en]`, and the echo guard then rejected its "translation". That is
+correct. cnverc does not detect language: `[languages] source`/`target` in `cnverc.toml` fix
+it, and Parakeet is multilingual so `asr.rs` ignores the per-utterance language argument. The
+clip didn't match `source = "en"`, so the translator was asked to turn Spanish into Spanish,
+and the guard caught the echo exactly as designed.
 
 **Also on this machine:** a fully parallel build ran it out of memory and took Claude Code
 down with it. Use `-j2` for `cargo` and `CMAKE_BUILD_PARALLEL_LEVEL=2`.

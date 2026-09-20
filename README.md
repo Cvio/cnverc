@@ -5,9 +5,12 @@ Spanish into the microphone. cnverc writes down what they said, translates it in
 shows both on screen, and says the English out loud. It works the other way round too.
 
 Everything happens on your own computer. cnverc **never uses the internet**: it doesn't
-download anything, check for updates or send anything anywhere. Once it's set up, you can
-unplug the network, or copy the whole folder to a PC that has never been online, and it still
-works.
+download anything, check for updates or send anything anywhere. Once it's set up you can
+unplug the network and it keeps working.
+
+> On **Windows**, you can also copy the finished folder to a PC that has never been online and
+> it will run there. On **Linux** you can't yet: the Linux build uses a system package that
+> has to be installed on each PC. See [Setting up on Linux](#setting-up-on-linux).
 
 Inside, it runs five steps in order:
 
@@ -17,18 +20,87 @@ Inside, it runs five steps in order:
 4. **Speak.** Read the translation aloud.
 5. **Show.** Put both sentences on screen as captions.
 
-Each step uses a model file that you download once during setup (step 6 below).
+Each step uses a model file that you download once during setup.
 
-Technical details, design notes and the development workflow are in
-[TECHNICAL.md](TECHNICAL.md).
+### Where to go next
+
+| You want to… | Go to |
+|---|---|
+| Use a copy someone already set up | [Using cnverc](#using-cnverc) |
+| Use two PCs together | [Talking between two PCs](#talking-between-two-pcs) |
+| Set it up on a new Windows PC | [Setting up](#setting-up-on-a-new-pc) |
+| Set it up on a new Linux PC | [Setting up on Linux](#setting-up-on-linux) |
+| Fix something that went wrong | [If something goes wrong](#if-something-goes-wrong) |
+| Understand how it works inside | [TECHNICAL.md](TECHNICAL.md) |
+
+---
+
+## Using cnverc
+
+Double-click `cnverc.exe` (on Linux, `cnverc`). The first time, choose your microphone and
+speakers in the window; your choices are saved next to the program, so you only do it once.
+
+A second black window opens behind the main one. It's the log, and you can ignore it.
+
+On the left side of the window you choose:
+
+- **Languages:** who is speaking which language. Swap them to translate the other way.
+- **Recognizer:** Whisper or Parakeet. Try both and keep whichever hears your voice better.
+- **Microphone and output:** which devices to use.
+- **Mode:**
+  - **Take turns:** press **Space** to start talking and again when you've finished. A large
+    banner shows **READY**, **RECORDING** or **PROCESSING**. If you prefer, choose **Hold
+    Space while speaking** instead: hold the key down while you talk and let go when you're
+    done.
+  - **Listen continuously:** cnverc listens all the time and translates each time you pause.
+- **Speak translations:** untick this to see captions only, with no voice.
+- **Mute the microphone while speaking:** leave this on when using speakers, so cnverc doesn't
+  hear its own voice and translate it again. Turn it off only if you're wearing headphones.
+- **Pair with another PC:** two people, two PCs, one conversation. See
+  [Talking between two PCs](#talking-between-two-pcs).
+
+### Command-line options
+
+Optional, and mostly for troubleshooting:
+
+```bash
+cnverc --report              # which models are installed, and where it looked
+cnverc --devices             # which microphones and speakers it can see
+cnverc --listen              # listen and translate in the terminal, no window
+cnverc --listen --seconds 20 # the same, stopping after 20 seconds
+cnverc --listen --wav        # also save each utterance heard, into logs/segments/
+cnverc --listen --compare    # run every installed recognizer and show them side by side
+```
+
+`--wav` is the quickest way to find out why a sentence came out wrong: play back what cnverc
+actually recorded. `--compare` tells you which recognizer is better **on your voice**, which
+is not the same as which one scores better in published tests.
+
+---
+
+## Moving it to a PC with no internet
+
+**Windows only** — see the note at the top of this file for why.
+
+Only the PC you build on needs internet. To run cnverc on another Windows PC, copy these three
+things from `target/release/`:
+
+```
+cnverc.exe
+cnverc.toml
+models/
+```
+
+Put them in one folder anywhere — a USB stick, the desktop, another drive — and double-click
+`cnverc.exe`. Nothing needs installing on that PC.
 
 ---
 
 ## Setting up on a new PC
 
 The setup has to be done on a PC **with** internet, because you download the tools and the
-models. The finished folder doesn't need internet. These steps are for Windows 10 or 11; for
-Linux, see [Setting up on Linux](#setting-up-on-linux) after them.
+models. These steps are for Windows 10 or 11; for Linux, see
+[Setting up on Linux](#setting-up-on-linux).
 
 Allow about an hour, most of it spent waiting for downloads and the first build.
 
@@ -72,11 +144,7 @@ Then **close Git Bash and open it again**, so it can find Rust.
 cargo --version
 ```
 
-It should print `cargo 1.95` or a later version. If the number is lower, update Rust with:
-
-```bash
-rustup update
-```
+It should print `cargo 1.95` or a later version. If the number is lower, run `rustup update`.
 
 ### Step 4: Get the code
 
@@ -99,7 +167,16 @@ Every command after this one is run from inside this `cnverc` folder.
 ### Step 5: Build it
 
 Git Bash can't find the CMake that came with the Build Tools on its own, so tell it where
-CMake is. **You need to do this every time you open a new Git Bash window to build:**
+CMake is. **You need this line every time you open a new Git Bash window to build:**
+
+```bash
+export PATH="$PATH:$(dirname "$("/c/Program Files (x86)/Microsoft Visual Studio/Installer/vswhere.exe" -latest -find '**/CMake/bin/cmake.exe' | head -1)")"
+```
+
+That finds CMake whichever version of the Build Tools you have. If it prints nothing or the
+build still can't find CMake, set the path by hand instead — look inside
+`C:\Program Files (x86)\Microsoft Visual Studio\` to see which version number you have, and
+use it in place of the `18` here:
 
 ```bash
 export PATH="$PATH:/c/Program Files (x86)/Microsoft Visual Studio/18/BuildTools/Common7/IDE/CommonExtensions/Microsoft/CMake/CMake/bin"
@@ -116,92 +193,26 @@ some libraries). Later builds are much faster.
 
 ✅ **Check:** the last line says `Finished`, and the file `target/release/cnverc.exe` exists.
 
-> **Optional, only for rebuilding without internet:** skip this unless you need it. Only the
-> first build downloads anything: the speech library, which it saves in
-> `target/sherpa-onnx-prebuilt/`. To rebuild with no internet, point the build at the `lib`
-> folder inside it before running `cargo build`:
->
-> ```bash
-> export SHERPA_ONNX_LIB_DIR="$PWD/target/sherpa-onnx-prebuilt/sherpa-onnx-v1.13.8-win-x64-static-MT-Release-lib/lib"
-> ```
->
-> If you're going to delete `target/`, copy `target/sherpa-onnx-prebuilt/` somewhere safe
-> first, and use that copy's path instead. If the build then fails saying
-> `SHERPA_ONNX_LIB_DIR does not exist`, the path is wrong: run `unset SHERPA_ONNX_LIB_DIR` and
-> build normally.
-
-> **If the build fails with "cmake not found" or similar:** run the `export PATH=...` line
-> again and rebuild. If your Build Tools are a different version, the `18` in that path will
-> be different; look inside `C:\Program Files (x86)\Microsoft Visual Studio\` to see which
-> number you have.
-
-> **If the build fails mentioning "libclang" or "clang":** LLVM from step 2 is missing, or
-> was installed somewhere else. Install it, or tell the build where it is, then rebuild:
->
-> ```bash
-> export LIBCLANG_PATH="/c/Program Files/LLVM/bin"
-> ```
-
 ### Step 6: Download the models
 
-cnverc looks for everything in the folder `cnverc.exe` is in, which is `target/release/`.
-First copy the settings file and the empty model folders there:
+cnverc looks for everything in the folder `cnverc.exe` is in. First copy the settings file and
+the empty model folders there:
 
 ```bash
 cp -r models cnverc.toml target/release/
 ```
 
-```bash
-mkdir -p target/release/models/vad target/release/models/mt downloads
-```
-
-Now download each model. There are six, about 2.3 GB in total. Paste each block into Git Bash
-and wait for it to finish before pasting the next.
-
-**Voice detector.** It notices when someone starts and stops talking.
+Then run the download script. It fetches all six models, about 2.3 GB, and skips anything you
+already have — so if it stops partway, just run it again.
 
 ```bash
-curl -L -o target/release/models/vad/silero_vad.onnx https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/silero_vad.onnx
+./setup-models.sh
 ```
 
-**Translator** (1.1 GB). It must be saved under the lower-case name shown here.
+✅ **Check:** it ends with `All six downloaded into target/release/models`.
 
-```bash
-curl -L -o target/release/models/mt/qwen3-1.7b-q4_k_m.gguf https://huggingface.co/unsloth/Qwen3-1.7B-GGUF/resolve/main/Qwen3-1.7B-Q4_K_M.gguf
-```
-
-**Speech recognizer: Whisper** (564 MB). It turns speech into text.
-
-```bash
-curl -L -o downloads/whisper.tar.bz2 https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-whisper-turbo.tar.bz2
-tar -xjf downloads/whisper.tar.bz2 -C downloads
-cp downloads/sherpa-onnx-whisper-turbo/turbo-encoder.int8.onnx downloads/sherpa-onnx-whisper-turbo/turbo-decoder.int8.onnx downloads/sherpa-onnx-whisper-turbo/turbo-tokens.txt target/release/models/asr/whisper-large-v3-turbo/
-```
-
-**Speech recognizer: Parakeet** (487 MB). This is a second recognizer, so you can choose
-between them.
-
-```bash
-curl -L -o downloads/parakeet.tar.bz2 https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8.tar.bz2
-tar -xjf downloads/parakeet.tar.bz2 -C downloads
-cp downloads/sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8/{encoder.int8.onnx,decoder.int8.onnx,joiner.int8.onnx,tokens.txt} target/release/models/asr/parakeet-tdt-0.6b-v3-int8/
-```
-
-**English voice** (64 MB). This voice speaks English translations.
-
-```bash
-curl -L -o downloads/voice-en.tar.bz2 https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/vits-piper-en_US-lessac-medium.tar.bz2
-tar -xjf downloads/voice-en.tar.bz2 -C target/release/models/tts
-```
-
-**Spanish voice** (25 MB). This voice speaks Spanish translations.
-
-```bash
-curl -L -o downloads/voice-es.tar.bz2 https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/vits-piper-es_ES-carlfm-x_low.tar.bz2
-tar -xjf downloads/voice-es.tar.bz2 -C target/release/models/tts
-```
-
-When all six are done, you can delete the `downloads` folder. Nothing uses it any more.
+Each model and where it comes from is listed under [The models](#the-models) below, if you
+ever need to fetch one by hand.
 
 ### Step 7: Check that everything is in place
 
@@ -220,173 +231,98 @@ report again.
 
 ### Step 8: Run it
 
-Double-click `target/release/cnverc.exe` in File Explorer, or run it from Git Bash:
-
 ```bash
 ./target/release/cnverc.exe
 ```
 
-The first time it opens, choose your microphone and speakers in the window. Your choices are
-saved in `cnverc.toml`, next to the exe, so you only do this once.
-
-### Setting up on Linux
-
-The steps are the same as for Windows, with different tools. These are for Ubuntu or Debian;
-the package names on other distributions are similar. Linux support is new, so if a step
-fails, note exactly what it printed.
-
-1. **Install the tools** in a terminal:
-
-   ```bash
-   sudo apt install git curl build-essential cmake pkg-config libclang-dev libasound2-dev
-   ```
-
-   On Fedora the equivalent is
-   `sudo dnf install git curl gcc-c++ cmake pkgconf clang-devel alsa-lib-devel`.
-
-2. **Install Rust** with the command from <https://rustup.rs>, accepting the defaults, then
-   close the terminal and open a new one:
-
-   ```bash
-   curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
-   ```
-
-3. **Build the speech library.** On Windows the build downloads it ready-made. On Linux the
-   ready-made one crashes as soon as it loads a model (`free(): invalid pointer`), so build it
-   yourself, as a shared library using Ubuntu's own onnxruntime. Do this once, next to the
-   cnverc folder. The version must be exactly `v1.13.8`:
-
-   ```bash
-   sudo apt install libonnxruntime-dev
-   ```
-
-   ```bash
-   git clone https://github.com/k2-fsa/sherpa-onnx && cd sherpa-onnx && git checkout v1.13.8
-   ```
-
-   ```bash
-   cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=ON -DSHERPA_ONNX_ENABLE_PYTHON=OFF -DSHERPA_ONNX_ENABLE_TESTS=OFF -DCMAKE_INSTALL_PREFIX="$HOME/sherpa-onnx/install"
-   ```
-
-   ```bash
-   cmake --build build -j2 --target install
-   ```
-
-   Check that the configure step printed `location_onnxruntime_lib: /usr/lib/...`. If it says
-   `Downloading pre-compiled onnxruntime` instead, `libonnxruntime-dev` isn't installed.
-   `-j2` keeps the build within about 8 GB of memory; a larger number can run out.
-
-4. **Get the code and build it**, as in steps 4 and 5 above, but with no `export PATH` line.
-   Tell the build where the speech library is, in every new terminal you build from:
-
-   ```bash
-   export SHERPA_ONNX_LIB_DIR="$HOME/sherpa-onnx/install/lib"
-   ```
-
-   ```bash
-   cargo build --release -j2
-   ```
-
-   The build copies `libsherpa-onnx-c-api.so` into `target/release/` next to `cnverc`, which
-   finds it there. It also needs Ubuntu's `libonnxruntime` package, so a Linux build isn't
-   copy-to-run like the Windows one. If `lib` in that folder contains a `libonnxruntime.a`
-   (left over from building sherpa-onnx without `BUILD_SHARED_LIBS=ON`), move it out;
-   otherwise the build links it again, and the crash comes back.
-
-5. **Download the models** with exactly the commands in step 6. They work unchanged.
-
-6. **Check and run** as in steps 7 and 8. The program is `cnverc`, with no `.exe`:
-
-   ```bash
-   ./target/release/cnverc --report
-   ```
-
-   ```bash
-   ./target/release/cnverc
-   ```
-
-cnverc needs a desktop session to open its window. On Linux, the window lists microphones and
-speakers by their ALSA names; if you're unsure which to pick, "System default" is usually right.
+Then see [Using cnverc](#using-cnverc).
 
 ---
 
-## Using cnverc
+## Setting up on Linux
 
-On the left side of the window you choose:
+The same steps as Windows, with different tools, plus one extra: on Linux you build the speech
+library yourself, which adds about an hour. These commands are for Ubuntu or Debian; package
+names on other distributions are similar.
 
-- **Languages:** who is speaking which language. Swap them to translate the other way.
-- **Recognizer:** Whisper or Parakeet. Try both and keep whichever hears your voice better.
-- **Microphone and output:** which devices to use.
-- **Mode:**
-  - **Take turns:** press **Space** to start talking and again when you've finished. A large
-    banner shows **READY**, **RECORDING** or **PROCESSING**. If you prefer, choose **Hold
-    Space while speaking** instead: hold the key down while you talk and let go when you're
-    done.
-  - **Listen continuously:** cnverc listens all the time and translates each time you pause.
-- **Speak translations:** untick this to see captions only, with no voice.
-- **Mute the microphone while speaking:** leave this on when using speakers, so cnverc doesn't
-  hear its own voice and translate it again. Turn it off only if you're wearing headphones.
-- **Pair with another PC:** two people, two PCs, one conversation. See
-  [Talking between two PCs](#talking-between-two-pcs) below.
+These steps have been followed on **Ubuntu 26.04**, and that is the only Linux they have been
+tried on. Step 3 needs a distribution that packages onnxruntime (Ubuntu 25.04 and later do),
+and only Ubuntu's version 1.23 has been tested. Linux support is new, so if a step fails, note
+exactly what it printed.
 
-A second black window opens behind the main one. It's the log, and you can ignore it.
-
-### Command-line options
-
-These are optional and mostly useful for troubleshooting:
+**1. Install the tools.**
 
 ```bash
-cnverc --report              # which models are installed, and where it looked
-cnverc --devices             # which microphones and speakers it can see
-cnverc --listen              # listen and translate in the terminal, no window
-cnverc --listen --seconds 20 # the same, stopping after 20 seconds
+sudo apt install git curl build-essential cmake pkg-config libclang-dev libasound2-dev libonnxruntime-dev
 ```
 
----
+On Fedora: `sudo dnf install git curl gcc-c++ cmake pkgconf clang-devel alsa-lib-devel`. Note
+that Fedora has no onnxruntime package; see
+[TECHNICAL.md → Linux: shared sherpa-onnx](TECHNICAL.md#linux-shared-sherpa-onnx) before you
+start.
 
-## Moving it to a PC with no internet
+**2. Install Rust** with the command from <https://rustup.rs>, accepting the defaults, then
+close the terminal and open a new one:
 
-Only the PC you build on needs internet. To run cnverc on any other Windows PC, copy these from
-`target/release/`:
-
+```bash
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 ```
-cnverc.exe
-cnverc.toml
-models/
+
+**3. Build the speech library.** On Windows the build downloads this ready-made. The ready-made
+Linux one crashes as soon as it loads a model, so build it yourself. Do this once, anywhere;
+the version must be exactly `v1.13.8`.
+
+```bash
+git clone https://github.com/k2-fsa/sherpa-onnx && cd sherpa-onnx && git checkout v1.13.8
 ```
 
-Put them in one folder anywhere, for example on a USB stick, the desktop or another drive,
-and double-click `cnverc.exe`. Nothing needs installing on that PC.
+```bash
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=ON -DSHERPA_ONNX_ENABLE_PYTHON=OFF -DSHERPA_ONNX_ENABLE_TESTS=OFF -DCMAKE_INSTALL_PREFIX="$HOME/sherpa-onnx/install"
+```
 
----
+✅ **Check:** that command printed `location_onnxruntime_lib: /usr/lib/...`. If it said
+`Downloading pre-compiled onnxruntime` instead, stop — `libonnxruntime-dev` isn't installed,
+and continuing gives you a build that crashes later.
 
-## The models
+```bash
+cmake --build build -j2 --target install
+```
 
-Every model lives in its own folder under `models/`, keeping the name it was published with.
-To see what a file is, look at the folder it's in.
+`-j2` matters: a fully parallel build can run a 10 GB PC out of memory.
 
-| Job | Model used | Folder | Where it comes from |
-|---|---|---|---|
-| Notice speech | Silero VAD | `models/vad/` | [sherpa-onnx releases](https://github.com/k2-fsa/sherpa-onnx/releases/tag/asr-models) (`silero_vad.onnx`), or [silero-vad](https://github.com/snakers4/silero-vad) |
-| Speech → text | Whisper large-v3-turbo (int8) | `models/asr/whisper-large-v3-turbo/` | [sherpa-onnx ASR releases](https://github.com/k2-fsa/sherpa-onnx/releases/tag/asr-models) (`sherpa-onnx-whisper-turbo.tar.bz2`) |
-| Speech → text | NVIDIA Parakeet TDT 0.6B v3 (int8) | `models/asr/parakeet-tdt-0.6b-v3-int8/` | [sherpa-onnx ASR releases](https://github.com/k2-fsa/sherpa-onnx/releases/tag/asr-models) (`sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8.tar.bz2`) |
-| Translate | Qwen3 1.7B (Q4_K_M) | `models/mt/` | [unsloth/Qwen3-1.7B-GGUF](https://huggingface.co/unsloth/Qwen3-1.7B-GGUF) (`Qwen3-1.7B-Q4_K_M.gguf`) |
-| Speak English | Piper en_US lessac (medium) | `models/tts/vits-piper-en_US-lessac-medium/` | [sherpa-onnx TTS releases](https://github.com/k2-fsa/sherpa-onnx/releases/tag/tts-models) (`vits-piper-en_US-lessac-medium.tar.bz2`) |
-| Speak Spanish | Piper es_ES carlfm (x_low) | `models/tts/vits-piper-es_ES-carlfm-x_low/` | [sherpa-onnx TTS releases](https://github.com/k2-fsa/sherpa-onnx/releases/tag/tts-models) (`vits-piper-es_ES-carlfm-x_low.tar.bz2`) |
+**4. Get the code and build it**, as in steps 4 and 5 above but with no `export PATH` line.
+Tell the build where the speech library is, in every new terminal you build from:
 
-Each recognizer and voice folder has a small `engine.toml` that comes with the code. It tells
-cnverc what the model is and which files belong to it. The model files themselves are
-downloaded separately and are never stored in the repository.
+```bash
+export SHERPA_ONNX_LIB_DIR="$HOME/sherpa-onnx/install/lib"
+```
 
-**Swapping models:**
+```bash
+cargo build --release -j2
+```
 
-- **Translator:** `models/mt/` must hold exactly **one** `.gguf` file, and it must be a
-  **Qwen3** model. To try a different size, move the old file out and put the new one in.
-- **Voices:** cnverc picks the voice that matches the language it's translating *into*. To
-  speak another language, add a Piper voice for it, with its own folder and `engine.toml`.
-- **Anything else:** a folder with no `engine.toml` is skipped. If a file named in the
-  `engine.toml` is missing, that model shows as disabled in the report, with the missing
-  file's name.
+**5. Download the models**, the same as step 6 above:
+
+```bash
+cp -r models cnverc.toml target/release/ && ./setup-models.sh
+```
+
+**6. Check and run**, as in steps 7 and 8. The program is `cnverc`, with no `.exe`:
+
+```bash
+./target/release/cnverc --report
+```
+
+```bash
+./target/release/cnverc
+```
+
+cnverc needs a desktop session to open its window. The window lists microphones and speakers by
+their ALSA names; if you're unsure which to pick, "System default" is usually right.
+
+**If a model load ends in `free(): invalid pointer`,** the build picked up the wrong
+onnxruntime. The cause and the fix are in
+[TECHNICAL.md → Linux: shared sherpa-onnx](TECHNICAL.md#linux-shared-sherpa-onnx).
 
 ---
 
@@ -437,8 +373,8 @@ PC ever needs the internet.
 - **Take turns** (the usual way): press **Space** to talk, as on one PC. Only one person can
   talk at a time. Your banner shows **ASKING FOR THE FLOOR…** for a moment, then
   **RECORDING**. The other PC shows your PC's name followed by **IS TALKING**, and its Space
-  key won't start a turn until you've finished. When you press Space again, your
-  words appear on the other PC in their language and are spoken there.
+  key won't start a turn until you've finished. When you press Space again, your words appear
+  on the other PC in their language and are spoken there.
 
   Because only the person talking has a live microphone, you can both use speakers.
 
@@ -489,6 +425,59 @@ with no router, **Public**, and blocks incoming connections on it. cnverc can li
 nothing reaches it, and the other PC just waits. cnverc recognises this and says so. The fix is
 on the PC that isn't being reached: open **Settings › Network & internet**, choose that
 network's adapter, and set **Network profile type** to **Private**.
+
+---
+
+## If something goes wrong
+
+| What you see | What it means | What to do |
+|---|---|---|
+| `cmake not found`, or the build stops mentioning CMake | Git Bash can't see the Build Tools' CMake | Run the `export PATH=…` line from [step 5](#step-5-build-it) again, in this window |
+| The build mentions `libclang` or `clang` | LLVM is missing or somewhere else | Install it ([step 2](#step-2-install-the-c-build-tools-and-llvm)), or `export LIBCLANG_PATH="/c/Program Files/LLVM/bin"` |
+| `Access is denied (os error 5)` when building | cnverc is still running and holding its own file | Close the cnverc window, then build again |
+| `SHERPA_ONNX_LIB_DIR does not exist` | That variable points at a folder that isn't there | `unset SHERPA_ONNX_LIB_DIR` and build again (Windows), or fix the path (Linux) |
+| `free(): invalid pointer` when a model loads — **Linux** | The wrong onnxruntime got linked in | [TECHNICAL.md → Linux: shared sherpa-onnx](TECHNICAL.md#linux-shared-sherpa-onnx) |
+| `ALSA lib pcm.c … Unknown PCM pulse/jack/oss` — **Linux** | Harmless: cnverc is probing plug-ins you don't have | Ignore it. If no microphone shows up at all, `sudo apt install libasound2-plugins` |
+| `Schema error: … already registered` — **Linux** | Harmless startup message from onnxruntime | Ignore it |
+| A model shows `DISABLED - missing: …` in `--report` | A file isn't where the report says it looked | Put it at exactly that path, or run `./setup-models.sh` again |
+| A sentence comes out wrong | Could be mishearing or mistranslation | Run `--listen --wav` and play back `logs/segments/` to see which |
+
+Building again without internet, and every other build detail, is in
+[TECHNICAL.md → Building](TECHNICAL.md#building).
+
+---
+
+## The models
+
+Every model lives in its own folder under `models/`, keeping the name it was published with.
+To see what a file is, look at the folder it's in. `./setup-models.sh` downloads all of these;
+the table is here for when you want to fetch or replace one by hand.
+
+| Job | Model used | Folder | Where it comes from |
+|---|---|---|---|
+| Notice speech | Silero VAD | `models/vad/` | [sherpa-onnx releases](https://github.com/k2-fsa/sherpa-onnx/releases/tag/asr-models) (`silero_vad.onnx`), or [silero-vad](https://github.com/snakers4/silero-vad) |
+| Speech → text | Whisper large-v3-turbo (int8) | `models/asr/whisper-large-v3-turbo/` | [sherpa-onnx ASR releases](https://github.com/k2-fsa/sherpa-onnx/releases/tag/asr-models) (`sherpa-onnx-whisper-turbo.tar.bz2`) |
+| Speech → text | NVIDIA Parakeet TDT 0.6B v3 (int8) | `models/asr/parakeet-tdt-0.6b-v3-int8/` | [sherpa-onnx ASR releases](https://github.com/k2-fsa/sherpa-onnx/releases/tag/asr-models) (`sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8.tar.bz2`) |
+| Translate | Qwen3 1.7B (Q4_K_M) | `models/mt/` | [unsloth/Qwen3-1.7B-GGUF](https://huggingface.co/unsloth/Qwen3-1.7B-GGUF) (`Qwen3-1.7B-Q4_K_M.gguf`) |
+| Speak English | Piper en_US lessac (medium) | `models/tts/vits-piper-en_US-lessac-medium/` | [sherpa-onnx TTS releases](https://github.com/k2-fsa/sherpa-onnx/releases/tag/tts-models) (`vits-piper-en_US-lessac-medium.tar.bz2`) |
+| Speak Spanish | Piper es_ES carlfm (x_low) | `models/tts/vits-piper-es_ES-carlfm-x_low/` | [sherpa-onnx TTS releases](https://github.com/k2-fsa/sherpa-onnx/releases/tag/tts-models) (`vits-piper-es_ES-carlfm-x_low.tar.bz2`) |
+
+Each recognizer and voice folder has a small `engine.toml` that comes with the code. It tells
+cnverc what the model is and which files belong to it. The model files themselves are
+downloaded separately and are never stored in the repository.
+
+**Swapping models:**
+
+- **Translator:** `models/mt/` must hold exactly **one** `.gguf` file, and it must be a
+  **Qwen3** model. To try a different size, move the old file out and put the new one in.
+- **Voices:** cnverc picks the voice that matches the language it's translating *into*. To
+  speak another language, add a Piper voice for it, with its own folder and `engine.toml`.
+- **Anything else:** a folder with no `engine.toml` is skipped. If a file named in the
+  `engine.toml` is missing, that model shows as disabled in the report, with the missing
+  file's name.
+
+Why these models and not others — including the translator sizes that were tried and rejected
+— is in [TECHNICAL.md](TECHNICAL.md).
 
 ---
 

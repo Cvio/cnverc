@@ -59,7 +59,7 @@ loses. If you believe one of these is wrong, stop and say so rather than working
 
 ## Status
 
-Milestones 0–6 complete. M7 is built; its check on two real PCs is pending.
+Milestones 0–7 complete. M8 (streaming ASR) has not started.
 
 - M0: skeleton, path resolution, config load, model discovery, report.
 - M1: cpal capture with device enumeration, resampling to 16 kHz mono at the capture
@@ -89,7 +89,7 @@ Milestones 0–6 complete. M7 is built; its check on two real PCs is pending.
   from the frame's input before any widget runs (`gui::take_turn_key`). `--listen` is
   always continuous: a terminal has no turn key.
 
-- M7 (built, check pending): paired mode. `wire.rs` is the §9 protocol and treats every
+- M7: paired mode. `wire.rs` is the §9 protocol and treats every
   inbound line as untrusted; `floor.rs` is the floor token as a pure state machine; `peer.rs`
   owns the connection on its own threads; `discovery.rs` is the UDP pick-list. In paired
   mode `Pipeline::send` routes the turn key to the peer thread, which opens the microphone
@@ -102,9 +102,11 @@ Linux (the user's `ubox`) builds and runs the full pipeline since 2026-09-19, us
 sherpa-onnx build described under "Build note". Build there with `-j2`: a fully parallel
 build of llama.cpp ran the 10 GB machine out of memory.
 
-The check for M7 needs the second PC (the user's is Linux, which §3 calls a nice-to-have):
-two machines on an isolated switch, a turn-based Spanish/English conversation, the uplink
-unplugged changing nothing, and a pulled cable force-releasing the floor on both ends.
+M7's check passed on 2026-09-20, between the user's Windows PC and `ubox`: a turn-based
+Spanish/English conversation with translations arriving and being spoken on the far side, and
+an abruptly killed link force-releasing the floor with an understandable message on both ends.
+The check was run over a local Wi-Fi network, disabling the adapter on one machine rather than
+pulling a cable — the same test of the ping-based detection, and closer to how it will be used.
 
 ## What the translation stage refuses
 

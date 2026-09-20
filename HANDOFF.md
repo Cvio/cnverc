@@ -20,16 +20,17 @@ as they are.
 
 ## 2. Status
 
-- **M0–M6 are complete** and checked by the user on Windows: capture, VAD, both recognizers,
-  translation, speech, the window, continuous and turn-based modes, and the Space turn key.
-- **M7 (paired mode) is built and committed** (`434fa60`, pushed) but **its check has not
-  run**. The check needs two PCs on an isolated switch: a turn-based Spanish/English
-  conversation, then a pulled cable force-releasing the floor on both ends. The second PC is
-  the user's Linux box, `ubox`.
-- **Linux runs.** The Start crash is fixed with a Linux-only shared sherpa-onnx build; see
-  section 5. Pressing Start in the window on `ubox` is still to be confirmed by the user.
-- M8 (streaming ASR) and M9 (portability acceptance) haven't started. Don't work ahead of
-  M7's check.
+- **M0–M7 are complete** and checked by the user: capture, VAD, both recognizers,
+  translation, speech, the window, continuous and turn-based modes, the Space turn key, and
+  paired mode.
+- **M7's check passed on 2026-09-20** between the Windows PC and `ubox`: a turn-based
+  Spanish/English conversation with translations spoken on the far side, and an abruptly
+  killed link force-releasing the floor with a clear message on both ends. It was run over
+  Wi-Fi, disabling the adapter rather than pulling a cable; the detection is the same either
+  way, since both are silent failures caught only by missed pings.
+- **Linux runs**, including the window. The Start crash is fixed with a Linux-only shared
+  sherpa-onnx build; see section 5.
+- M8 (streaming ASR) and M9 (portability acceptance) haven't started.
 
 ## 3. How the code works
 
@@ -124,10 +125,10 @@ sherpa-onnx"):
 **Verified:** `ldd` shows the `.so` from `target/release/` and the system onnxruntime.
 `--report` is all `ok`. A 60 s `--listen` run, with Piper-generated clips played through the
 speakers, went capture → VAD → Parakeet → Qwen → Spanish voice → playback, then exited
-cleanly. `cargo test`: 107 passed, 14 ignored. fmt and clippy clean.
+cleanly. `cargo test`: 107 passed, 14 ignored. fmt and clippy clean. The user has since
+confirmed the window opens and runs on `ubox`, unpaired and paired, as part of M7's check.
 
-**Not yet verified:** pressing Start in the window (no automated way to click it), both
-unpaired and with "Pair with another PC" ticked. The user is to try both.
+**Not yet verified:** nothing outstanding from the Linux work.
 
 **A log line that looks like a bug and isn't:** a Spanish clip was transcribed correctly by
 Parakeet but captioned `[en]`, and the echo guard then rejected its "translation". That is
@@ -177,11 +178,53 @@ is on.
 
 ## 8. Next steps
 
-1. The user presses Start on `ubox`, unpaired and then paired (section 5). If it holds,
-   commit the Linux build changes.
-2. Run the M7 check between the Windows PC and `ubox`: README, "Talking between two PCs".
-3. When it passes, mark M7 complete in `CLAUDE.md` and `TECHNICAL.md`, commit, and wait for the
-   go-ahead on M8.
-4. Optional: the Spanish-tagged-`[en]` observation in section 5.
+1. Wait for the go-ahead on M8 (streaming ASR). Don't start it unasked.
+
+Nothing is outstanding from M0–M7. The `[en]`-captioned Spanish clip in section 5 is **not** a
+bug and needs no work: cnverc doesn't detect language, the clip simply didn't match the
+configured `source`, and the echo guard behaved correctly.
+
+Filed, not started, and not part of any milestone: a **voice picker**. Installing a second
+Spanish voice (`vits-piper-es_MX-claude-high`, 2026-09-20) means two TTS entries declare
+`languages = ["es"]`, and `for_language` has no tiebreak and no config key — whichever it
+picks is arbitrary and the user can't change it. The likely shape is the same as the
+recognizer picker: list installed voices for the target language by their `engine.toml`
+`name`, save the choice in `cnverc.toml`. Note that the descriptor parser **rejects unknown
+fields**, so a `variety = "es-MX"` key cannot be added to an `engine.toml` until `models.rs`
+declares it.
+
+Also filed, not started, none of them urgent — three defects in the **peer panel**, found on
+2026-09-20 while pairing the Windows PC and `ubox` over a direct Ethernet cable. The pairing
+itself worked throughout; none of these stop a connection.
+
+1. **The address list omits an interface that works.** On the Windows PC, `peer::local_addresses()`
+   returned the Wi-Fi address and two IPv6 addresses but never the Ethernet adapter's
+   `169.254.49.46`, while `discovery.rs` was receiving broadcasts over that same interface and
+   listing `ubox` correctly. So `if_addrs::get_if_addrs()` is returning a partial result on
+   Windows rather than failing. Without discovery the user would have had no way to learn the
+   address to type. That machine has two ExpressVPN adapters in a "Not Present" state, which is
+   the obvious suspect but unconfirmed. Related but separate: line ~1057's `.unwrap_or_default()`
+   turns a failed enumeration into an empty list, so a real error becomes indistinguishable from
+   "no interfaces" — latent here, since the call succeeded.
+
+2. **"No network connection" is asserted while connected.** The `addresses.is_empty()` branch in
+   `gui::peer_panel` prints "No network connection. Plug in a cable or join a network, then
+   Rescan" — and did so with a live pairing shown two lines above it. An empty list means cnverc
+   found no addresses, not that the machine has no network; the wording should say that, and the
+   message should be suppressed entirely when `session.peer` is connected. As written it would
+   send someone to re-seat a working cable.
+
+3. **IPv6 addresses are offered as something to type.** The panel listed
+   `2600:4040:273b:b600:2909:d8fe:c14e:93b2` under "The other PC types one of these." They are
+   global, not link-local, so they pass the existing filter, but nobody is going to type one.
+   Show IPv4 only, or sort it first and de-emphasise the rest.
+
+Also worth knowing for any future two-machine test: with Wi-Fi left on, discovery finds the
+other PC on **both** paths (`169.254.x.x` over the cable and `192.168.1.x` over Wi-Fi) and
+clicking the wrong one silently pairs over Wi-Fi, so a cable test proves nothing. Turn Wi-Fi
+off first.
 
 Done on 2026-09-19: the Linux crash (section 5), and the README's `SHERPA_ONNX_LIB_DIR` note.
+Done on 2026-09-20: M7's check, over Wi-Fi and again over a direct Ethernet cable with no
+router, no DHCP and nothing upstream (SPEC §2's "WAN cable unplugged" case, proven); the README
+rewritten around `setup-models.sh` with a troubleshooting table; the ARM64 rpath fix.

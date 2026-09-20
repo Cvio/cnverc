@@ -1,12 +1,19 @@
-/target/
+﻿/target/
 
-# Model weights are never committed. Only the engine.toml descriptors are.
+# Model payload is never committed. Only the engine.toml descriptors are.
+# The archives bring more than weights: espeak-ng-data is ~1000 files per
+# Piper voice, and tokens.txt / MODEL_CARD / *.onnx.json come with them.
+# setup-models.sh downloads all of it.
 *.onnx
+*.onnx.json
 *.gguf
 *.bin
 *.tar.bz2
 *.tar.gz
 *.zip
+espeak-ng-data/
+*tokens.txt
+MODEL_CARD
 
 # Model archives downloaded during setup (README step 6).
 /downloads/

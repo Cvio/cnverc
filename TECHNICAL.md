@@ -7,8 +7,7 @@ is [SPEC.md](SPEC.md); the constraints every change must respect are restated in
 
 ## Status
 
-Milestones 0–6 of 9 are complete, and Milestone 7 is built and waiting for its check on two
-real PCs. Milestones are defined in `SPEC.md` §13 and built in order;
+Milestones 0–7 of 9 are complete. Milestones are defined in `SPEC.md` §13 and built in order;
 each one's check must pass before the next starts.
 
 Windows is the primary platform. Linux builds and runs the full pipeline too, using a shared
@@ -23,7 +22,7 @@ sherpa-onnx build; see "Linux: shared sherpa-onnx" under Building.
 | M4 | Synthesis through sherpa-onnx, playback through cpal, the half-duplex gate |
 | M5 | The egui window; the pipeline reports only through `PipelineMsg` |
 | M6 | Continuous and turn-based modes, switchable while running; the turn key in toggle and hold styles |
-| M7 | Paired mode: listener, dialler, `Hello`, `Utterance`, the floor token, the peer panel, the firewall diagnostic, the headset warning, discovery (check pending) |
+| M7 | Paired mode: listener, dialler, `Hello`, `Utterance`, the floor token, the peer panel, the firewall diagnostic, the headset warning, discovery |
 
 ## Architecture
 
@@ -377,7 +376,10 @@ server, so names are refused rather than looked up.
 
 **Noticing a dead link.** A pulled cable sends nothing, not even a reset. Each end pings every
 2 s, and a reader that hears nothing for 6 s declares the link gone: the floor is
-force-released and both windows show the disconnected state.
+force-released and both windows show the disconnected state. Verified on 2026-09-20 between
+the Windows PC and `ubox` over Wi-Fi, by disabling the adapter on one machine mid-session:
+both ends reported the loss and the floor was released. A disabled adapter and a pulled cable
+are the same case here — nothing arrives either way, and only the missed pings reveal it.
 
 **One peer at a time.** A second connection from a different PC is sent `Bye` with the reason
 and refused. Two connections between the same pair, from both PCs pressing Connect at once,

@@ -381,6 +381,14 @@ the Windows PC and `ubox` over Wi-Fi, by disabling the adapter on one machine mi
 both ends reported the loss and the floor was released. A disabled adapter and a pulled cable
 are the same case here — nothing arrives either way, and only the missed pings reveal it.
 
+Pairing was checked again the same day over a **direct Ethernet cable between the two PCs**,
+with Wi-Fi switched off on both: no router, no DHCP server and nothing upstream on the segment.
+Both ends fell back to link-local addressing (`169.254.x.x`) after about thirty seconds,
+discovery found the other PC, and the conversation worked. That is SPEC §2's "would it still
+work with the WAN cable unplugged and no DNS server anywhere on the segment?" answered on real
+hardware rather than by inspection. Three cosmetic defects in the peer panel surfaced during
+that run; see HANDOFF.md, section 8.
+
 **One peer at a time.** A second connection from a different PC is sent `Bye` with the reason
 and refused. Two connections between the same pair, from both PCs pressing Connect at once,
 settle on the one with the lower dialling address; both ends compute the same answer.

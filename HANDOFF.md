@@ -193,6 +193,38 @@ recognizer picker: list installed voices for the target language by their `engin
 fields**, so a `variety = "es-MX"` key cannot be added to an `engine.toml` until `models.rs`
 declares it.
 
+Also filed, not started, none of them urgent — three defects in the **peer panel**, found on
+2026-09-20 while pairing the Windows PC and `ubox` over a direct Ethernet cable. The pairing
+itself worked throughout; none of these stop a connection.
+
+1. **The address list omits an interface that works.** On the Windows PC, `peer::local_addresses()`
+   returned the Wi-Fi address and two IPv6 addresses but never the Ethernet adapter's
+   `169.254.49.46`, while `discovery.rs` was receiving broadcasts over that same interface and
+   listing `ubox` correctly. So `if_addrs::get_if_addrs()` is returning a partial result on
+   Windows rather than failing. Without discovery the user would have had no way to learn the
+   address to type. That machine has two ExpressVPN adapters in a "Not Present" state, which is
+   the obvious suspect but unconfirmed. Related but separate: line ~1057's `.unwrap_or_default()`
+   turns a failed enumeration into an empty list, so a real error becomes indistinguishable from
+   "no interfaces" — latent here, since the call succeeded.
+
+2. **"No network connection" is asserted while connected.** The `addresses.is_empty()` branch in
+   `gui::peer_panel` prints "No network connection. Plug in a cable or join a network, then
+   Rescan" — and did so with a live pairing shown two lines above it. An empty list means cnverc
+   found no addresses, not that the machine has no network; the wording should say that, and the
+   message should be suppressed entirely when `session.peer` is connected. As written it would
+   send someone to re-seat a working cable.
+
+3. **IPv6 addresses are offered as something to type.** The panel listed
+   `2600:4040:273b:b600:2909:d8fe:c14e:93b2` under "The other PC types one of these." They are
+   global, not link-local, so they pass the existing filter, but nobody is going to type one.
+   Show IPv4 only, or sort it first and de-emphasise the rest.
+
+Also worth knowing for any future two-machine test: with Wi-Fi left on, discovery finds the
+other PC on **both** paths (`169.254.x.x` over the cable and `192.168.1.x` over Wi-Fi) and
+clicking the wrong one silently pairs over Wi-Fi, so a cable test proves nothing. Turn Wi-Fi
+off first.
+
 Done on 2026-09-19: the Linux crash (section 5), and the README's `SHERPA_ONNX_LIB_DIR` note.
-Done on 2026-09-20: M7's check; the README rewritten around `setup-models.sh` with a
-troubleshooting table; the ARM64 rpath fix.
+Done on 2026-09-20: M7's check, over Wi-Fi and again over a direct Ethernet cable with no
+router, no DHCP and nothing upstream (SPEC §2's "WAN cable unplugged" case, proven); the README
+rewritten around `setup-models.sh` with a troubleshooting table; the ARM64 rpath fix.

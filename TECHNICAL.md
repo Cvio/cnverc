@@ -3,7 +3,8 @@
 This is the maintainer's companion to [README.md](README.md). The README explains what cnverc
 is and how to set it up. This file explains how it's built and why. The build specification
 is [SPEC.md](SPEC.md); the constraints every change must respect are restated in
-[CLAUDE.md](CLAUDE.md).
+[CLAUDE.md](CLAUDE.md). How to tune models for a regional dialect, and which ones, is in
+[DIALECTS.md](DIALECTS.md).
 
 ## Status
 

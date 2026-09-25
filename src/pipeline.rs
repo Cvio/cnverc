@@ -745,6 +745,7 @@ fn describe_mode(mode: ModeKind) -> &'static str {
     match mode {
         ModeKind::Continuous => "listening continuously",
         ModeKind::Turn => "waiting for a turn, microphone closed",
+        ModeKind::Shared => "shared machine, waiting for either person's key, microphone closed",
     }
 }
 

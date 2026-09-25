@@ -19,9 +19,9 @@ const POLL: Duration = Duration::from_millis(100);
 
 pub fn run(root: &Path, config: &Config, seconds: Option<u64>, options: Options) -> Result<()> {
     // A terminal has no turn key, so --listen always listens continuously.
-    // Taking turns needs the window (SPEC §8).
+    // Taking turns, alone or on a shared machine, needs the window (SPEC §8).
     let mut config = config.clone();
-    if config.mode.kind == ModeKind::Turn {
+    if config.mode.kind != ModeKind::Continuous {
         info!("--listen listens continuously; turn-taking is in the window");
         config.mode.kind = ModeKind::Continuous;
     }

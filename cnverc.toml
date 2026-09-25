@@ -9,7 +9,7 @@ source = "es"
 target = "en"
 
 [mode]
-kind = "turn"            # "continuous" | "turn"
+kind = "turn"            # "continuous" | "turn" | "shared"
 turn_key = "Space"
 turn_style = "toggle"    # "toggle" | "hold"
 
@@ -32,3 +32,15 @@ listen_addr = "0.0.0.0:47800"
 peer_addr = ""           # e.g. "192.168.50.2:47800"
 display_name = ""        # empty = hostname
 discovery = true         # convenience; manual entry always works
+
+[shared]
+# Shared-machine mode: two people, one machine, a key each.
+left_language = "en"
+right_language = "es"
+# left_voice speaks what the LEFT person said, so it is a voice in the RIGHT
+# person's language. A folder name under models/tts/; empty = first match.
+left_voice = ""
+# right_voice speaks what the RIGHT person said, in the LEFT person's language.
+right_voice = ""
+left_key = "ArrowLeft"
+right_key = "ArrowRight"

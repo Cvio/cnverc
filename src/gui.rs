@@ -661,6 +661,23 @@ impl App {
             ModeKind::Continuous,
             "Listen continuously",
         );
+        // Shared mode is one machine for two people; paired mode is two
+        // machines. They cannot both be on (shared-machine-mode.md, decision 1).
+        let paired = self.config.peer.enabled;
+        ui.add_enabled_ui(!paired, |ui| {
+            ui.radio_value(
+                &mut self.config.mode.kind,
+                ModeKind::Shared,
+                "Shared machine (two people, a key each)",
+            )
+            .on_disabled_hover_text(
+                "Not while paired: untick \"Pair with another PC\" first. Shared mode is two \
+                 people at one machine.",
+            );
+        });
+        if paired {
+            ui.weak("Shared machine is off while pairing is ticked.");
+        }
         if self.config.mode.kind == ModeKind::Turn {
             ui.indent("turn style", |ui| {
                 ui.radio_value(
@@ -693,7 +710,8 @@ impl App {
     /// found, and the state of the connection. Usable while running: pairing
     /// happens after Start.
     fn peer_panel(&mut self, ui: &mut egui::Ui) {
-        let editable = !self.running();
+        let shared = self.config.mode.kind == ModeKind::Shared;
+        let editable = !self.running() && !shared;
         let toggled = ui
             .add_enabled(
                 editable,
@@ -703,6 +721,11 @@ impl App {
                 "Two PCs, one conversation. Each translates what its own person says and \
                  sends only the text; the other PC shows it and speaks it.",
             )
+            .on_disabled_hover_text(if shared {
+                "Not in Shared machine mode: choose another mode first."
+            } else {
+                "Stop to change this."
+            })
             .changed();
         if toggled {
             self.save();
@@ -933,6 +956,10 @@ impl App {
                 },
                 SLATE,
             ),
+            // Shared machine: keys and turns arrive in the next steps of M7.5.
+            (RunState::Listening, Some(ModeKind::Shared), _) => {
+                ("SHARED MACHINE — not active yet".to_string(), GREY)
+            }
             (RunState::Listening, _, _) if s.comparing => ("COMPARING".to_string(), AMBER),
             (RunState::Listening, _, _) if s.speaking => ("SPEAKING".to_string(), BLUE),
             (RunState::Listening, _, _) => ("LISTENING".to_string(), GREEN),

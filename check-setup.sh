@@ -100,6 +100,22 @@ if [ "$os" = windows ]; then
         "Install LLVM-<version>-win64.exe from https://github.com/llvm/llvm-project/releases/latest, choosing 'Add LLVM to the system PATH'"
   fi
 
+  # The build creates files about 170 characters deeper than this folder, and
+  # the Microsoft build tools fail past Windows' 260-character path limit with
+  # the misleading "No CMAKE_C_COMPILER could be found".
+  here=$(pwd -W 2>/dev/null || pwd)
+  if [ "${#here}" -gt 80 ]; then
+    bad "This folder's path is too long for the build (${#here} characters): $here" \
+        "Move or clone cnverc into a short folder, such as C:\\cnverc or D:\\projects\\cnverc (80 characters at most)"
+  else
+    ok "Folder path is short enough (${#here} characters)"
+  fi
+  case "$here" in
+    *[Tt]emp/*|*[Tt]emp\\*|*[Tt]mp/*|*[Tt]mp\\*)
+      note "This folder is inside a Temp folder, which the Microsoft build tools warn against." \
+           "Prefer a normal folder, such as C:\\cnverc or D:\\projects\\cnverc" ;;
+  esac
+
   if [ -n "${SHERPA_ONNX_LIB_DIR:-}" ] && [ ! -d "${SHERPA_ONNX_LIB_DIR}" ]; then
     note "SHERPA_ONNX_LIB_DIR is set to a folder that doesn't exist: $SHERPA_ONNX_LIB_DIR" \
          "setup.sh ignores it. To clear it yourself: unset SHERPA_ONNX_LIB_DIR"

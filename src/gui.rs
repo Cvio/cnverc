@@ -141,7 +141,6 @@ pub struct Caption {
     /// Paired: the PC it was sent to.
     pub sent_to: Option<String>,
     /// Shared machine: whose words these were.
-    #[allow(dead_code, reason = "read by the two-column layout, M7.5 step 5")]
     pub side: Option<Side>,
 }
 
@@ -1094,10 +1093,6 @@ impl App {
                 },
                 SLATE,
             ),
-            // Shared machine: keys and turns arrive in the next steps of M7.5.
-            (RunState::Listening, Some(ModeKind::Shared), _) => {
-                ("SHARED MACHINE — not active yet".to_string(), GREY)
-            }
             (RunState::Listening, _, _) if s.comparing => ("COMPARING".to_string(), AMBER),
             (RunState::Listening, _, _) if s.speaking => ("SPEAKING".to_string(), BLUE),
             (RunState::Listening, _, _) => ("LISTENING".to_string(), GREEN),
@@ -1170,7 +1165,12 @@ impl App {
         ui.add_enabled_ui(editable, |ui| {
             changed |= self.recognizer_picker(ui);
             ui.add_space(8.0);
-            changed |= self.language_pickers(ui);
+            if self.config.mode.kind == ModeKind::Shared {
+                ui.label("Languages");
+                ui.weak("Set for each side, above the two columns.");
+            } else {
+                changed |= self.language_pickers(ui);
+            }
             ui.add_space(8.0);
             changed |= self.device_pickers(ui);
             ui.add_space(8.0);
@@ -1373,6 +1373,10 @@ impl App {
                 )
                 .changed();
 
+            if self.config.mode.kind == ModeKind::Shared {
+                ui.weak("Voices are chosen for each side, above the two columns.");
+                return;
+            }
             match tts::for_language(&self.voices, &self.config.languages.target) {
                 Ok(voice) => {
                     ui.weak(format!("Voice: {}", voice.name));
@@ -1503,6 +1507,230 @@ impl App {
         {
             ui.colored_label(Color32::from_rgb(220, 90, 70), problem);
         }
+    }
+
+    /// Shared machine: the per-side settings above, and a column per person,
+    /// placed where they sit. Whose turn it is must be obvious from a metre
+    /// away, so the active column is filled with a strong colour, and says in
+    /// large type what it is doing.
+    fn shared_view(&mut self, ui: &mut egui::Ui) {
+        let busy = self.session.turn != TurnState::Idle || self.session.speaking;
+        let mut changed = false;
+        ui.add_enabled_ui(!busy, |ui| {
+            ui.columns(2, |cols| {
+                for (col, side) in cols.iter_mut().zip([Side::Left, Side::Right]) {
+                    changed |= self.shared_settings(col, side);
+                }
+            });
+        });
+        if busy {
+            ui.weak("Settings are locked until this turn is over.");
+        }
+        if changed {
+            self.save();
+        }
+        ui.add_space(6.0);
+
+        ui.columns(2, |cols| {
+            for (col, side) in cols.iter_mut().zip([Side::Left, Side::Right]) {
+                self.shared_column(col, side);
+            }
+        });
+    }
+
+    /// One side's language and voice. The voice list holds only voices in
+    /// the OTHER side's language: it is the voice this side's words are
+    /// spoken in.
+    fn shared_settings(&mut self, ui: &mut egui::Ui, side: Side) -> bool {
+        let languages = self.known_languages();
+        let voices: Vec<(String, String)> =
+            shared::voices_for(side.other().language(&self.config.shared), &self.voices)
+                .into_iter()
+                .map(|v| (v.dir_name.clone(), v.name.clone()))
+                .collect();
+        let mut changed = false;
+        let title = match side {
+            Side::Left => "Left person",
+            Side::Right => "Right person",
+        };
+        ui.label(RichText::new(title).strong());
+
+        let (language, voice) = match side {
+            Side::Left => (
+                &mut self.config.shared.left_language,
+                &mut self.config.shared.left_voice,
+            ),
+            Side::Right => (
+                &mut self.config.shared.right_language,
+                &mut self.config.shared.right_voice,
+            ),
+        };
+        egui::ComboBox::from_id_salt(("shared language", side.to_string()))
+            .width(ui.available_width())
+            .selected_text(format!("Speaks {}", describe_language(language)))
+            .show_ui(ui, |ui| {
+                for code in &languages {
+                    changed |= ui
+                        .selectable_value(language, code.clone(), describe_language(code))
+                        .changed();
+                }
+            });
+
+        let shown = voices
+            .iter()
+            .find(|(folder, _)| folder == voice)
+            .map(|(_, name)| format!("Spoken as: {name}"))
+            .unwrap_or_else(|| {
+                if voice.is_empty() {
+                    "Spoken as: the first installed voice".to_string()
+                } else {
+                    format!("Spoken as: {voice} (not installed)")
+                }
+            });
+        egui::ComboBox::from_id_salt(("shared voice", side.to_string()))
+            .width(ui.available_width())
+            .selected_text(shown)
+            .show_ui(ui, |ui| {
+                changed |= ui
+                    .selectable_value(voice, String::new(), "The first installed voice")
+                    .changed();
+                for (folder, name) in &voices {
+                    changed |= ui
+                        .selectable_value(voice, folder.clone(), format!("{name} ({folder})"))
+                        .changed();
+                }
+            })
+            .response
+            .on_hover_text(
+                "The voice this person's words are spoken in, so a voice in the other \
+                 person's language.",
+            );
+        changed
+    }
+
+    /// One person's column: their language and key in large type, what is
+    /// happening, and what they have said so far.
+    fn shared_column(&self, ui: &mut egui::Ui, side: Side) {
+        const IDLE: Color32 = Color32::from_rgb(52, 58, 70);
+        const RED: Color32 = Color32::from_rgb(196, 40, 40);
+        const AMBER: Color32 = Color32::from_rgb(190, 125, 20);
+        const BLUE: Color32 = Color32::from_rgb(40, 100, 170);
+        const GREEN: Color32 = Color32::from_rgb(38, 130, 70);
+
+        let s = &self.session;
+        let key = self
+            .shared_keys
+            .iter()
+            .find(|(k, _, _)| *k == side)
+            .map(|(_, key, _)| key_symbol(*key))
+            .unwrap_or_default();
+        let language = side.language(&self.config.shared);
+        let mine = s.active_side == Some(side);
+        let running = s.state == RunState::Listening && s.mode == Some(ModeKind::Shared);
+
+        let (status, fill) = if !running {
+            (
+                match &s.state {
+                    RunState::Starting(_) => "Loading…".to_string(),
+                    _ => "Press Start".to_string(),
+                },
+                IDLE,
+            )
+        } else if mine {
+            match s.turn {
+                TurnState::Recording => (format!("● Listening — press {key} to finish"), RED),
+                _ if s.speaking => ("Speaking".to_string(), BLUE),
+                _ => ("Working…".to_string(), AMBER),
+            }
+        } else if s.speaking {
+            ("Speaking — wait".to_string(), IDLE)
+        } else if s.turn != TurnState::Idle {
+            ("Wait — the other person has the turn".to_string(), IDLE)
+        } else {
+            (format!("Ready — press {key}"), GREEN)
+        };
+
+        // Why this side can't take a turn, worked out now so it shows before
+        // anyone presses the key.
+        let refusal = shared::direction(
+            side,
+            &self.config.shared,
+            self.selected_recognizer(),
+            &self.voices,
+        )
+        .err();
+
+        egui::Frame::new()
+            .fill(if mine { fill } else { IDLE })
+            .stroke(egui::Stroke::new(
+                if mine { 4.0 } else { 1.0 },
+                if mine {
+                    Color32::WHITE
+                } else {
+                    Color32::from_gray(90)
+                },
+            ))
+            .corner_radius(10)
+            .inner_margin(14)
+            .show(ui, |ui| {
+                ui.set_width(ui.available_width());
+                ui.label(
+                    RichText::new(format!("{} — {key}", language_name(language)))
+                        .size(34.0)
+                        .strong()
+                        .color(Color32::WHITE),
+                );
+                let status_colour = if mine || fill == GREEN {
+                    Color32::WHITE
+                } else {
+                    Color32::from_gray(200)
+                };
+                let status_text = RichText::new(status).size(22.0).color(status_colour);
+                if !mine && fill == GREEN {
+                    egui::Frame::new()
+                        .fill(GREEN)
+                        .corner_radius(6)
+                        .inner_margin(6)
+                        .show(ui, |ui| {
+                            ui.label(status_text);
+                        });
+                } else {
+                    ui.label(status_text);
+                }
+                for problem in [refusal.as_ref(), self.shared_notes.get(&side)]
+                    .into_iter()
+                    .flatten()
+                {
+                    ui.label(
+                        RichText::new(problem)
+                            .color(Color32::from_rgb(255, 200, 120))
+                            .size(15.0),
+                    );
+                }
+            });
+        ui.add_space(6.0);
+
+        egui::ScrollArea::vertical()
+            .id_salt(("shared history", side.to_string()))
+            .auto_shrink([false, false])
+            .stick_to_bottom(true)
+            .show(ui, |ui| {
+                let mine: Vec<&Caption> = s
+                    .lines
+                    .iter()
+                    .filter_map(|line| match line {
+                        Line::Caption(c) if c.side == Some(side) => Some(c),
+                        _ => None,
+                    })
+                    .collect();
+                if mine.is_empty() {
+                    ui.weak("What this person says, and its translation, appears here.");
+                }
+                for c in mine {
+                    shared_card(ui, c);
+                    ui.add_space(6.0);
+                }
+            });
     }
 
     fn captions(&self, ui: &mut egui::Ui) {
@@ -1659,7 +1887,13 @@ impl eframe::App for App {
             .show(ui, |ui| {
                 egui::ScrollArea::vertical().show(ui, |ui| self.settings_panel(ui));
             });
-        egui::CentralPanel::default().show(ui, |ui| self.captions(ui));
+        egui::CentralPanel::default().show(ui, |ui| {
+            if self.config.mode.kind == ModeKind::Shared {
+                self.shared_view(ui);
+            } else {
+                self.captions(ui);
+            }
+        });
     }
 }
 
@@ -1670,6 +1904,49 @@ fn describe_language(code: &str) -> String {
     } else {
         format!("{name} ({code})")
     }
+}
+
+/// A key as a person reads it. In words, not arrow symbols: egui's built-in
+/// font has no arrow glyphs and draws them as boxes.
+fn key_symbol(key: egui::Key) -> String {
+    match key {
+        egui::Key::ArrowLeft => "Left arrow".to_string(),
+        egui::Key::ArrowRight => "Right arrow".to_string(),
+        egui::Key::ArrowUp => "Up arrow".to_string(),
+        egui::Key::ArrowDown => "Down arrow".to_string(),
+        other => other.name().to_string(),
+    }
+}
+
+/// One shared-machine turn in its speaker's column: what they said, then
+/// what the machine said for them.
+fn shared_card(ui: &mut egui::Ui, c: &Caption) {
+    egui::Frame::group(ui.style()).show(ui, |ui| {
+        ui.set_width(ui.available_width());
+        ui.label(RichText::new(&c.source).size(18.0));
+        match (&c.target, &c.problem) {
+            (Some(text), _) => {
+                ui.label(RichText::new(text).size(18.0).strong());
+            }
+            (None, Some(problem)) => {
+                ui.label(
+                    RichText::new(format!("Not translated: {problem}"))
+                        .color(Color32::from_rgb(220, 150, 60)),
+                );
+            }
+            (None, None) => {
+                ui.label(RichText::new("…").size(18.0).weak());
+            }
+        }
+        let mut timing = format!(
+            "{} to {} · {} ms of speech",
+            c.source_lang, c.target_lang, c.speech_ms
+        );
+        if let Some(ms) = c.first_audio_ms {
+            timing.push_str(&format!(" · first audio {ms} ms"));
+        }
+        ui.small(timing);
+    });
 }
 
 /// One utterance: the translation large, the original beneath it, and the

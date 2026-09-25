@@ -22,6 +22,7 @@
 //! the window's state lives in [`Session`], which has no egui in it and is
 //! tested on its own.
 
+use std::collections::HashMap;
 use std::net::IpAddr;
 use std::path::PathBuf;
 use std::sync::mpsc::{channel, Receiver, Sender};
@@ -39,8 +40,10 @@ use crate::models::{self, AsrBackend, Backend, Engine, Entry, Role};
 use crate::paths;
 use crate::peer::{self, PeerState};
 use crate::pipeline::{self, Options, Pipeline, PipelineCmd, PipelineMsg};
+use crate::shared::{self, Side};
 use crate::translate::language_name;
 use crate::tts;
+use tracing::info;
 
 /// How often the window wakes to read messages while the pipeline runs.
 const REFRESH: Duration = Duration::from_millis(100);
@@ -137,6 +140,9 @@ pub struct Caption {
     pub first_audio_ms: Option<u128>,
     /// Paired: the PC it was sent to.
     pub sent_to: Option<String>,
+    /// Shared machine: whose words these were.
+    #[allow(dead_code, reason = "read by the two-column layout, M7.5 step 5")]
+    pub side: Option<Side>,
 }
 
 /// A line in the caption pane.
@@ -187,6 +193,9 @@ pub struct Session {
     pub floor_note: Option<String>,
     /// Other cnverc PCs heard on the network.
     pub discovered: Vec<Found>,
+    /// Shared machine: whose turn is being recorded, worked on or spoken.
+    /// Cleared when the turn is fully over.
+    pub active_side: Option<Side>,
 }
 
 impl Default for Session {
@@ -207,6 +216,7 @@ impl Default for Session {
             floor: None,
             floor_note: None,
             discovered: Vec::new(),
+            active_side: None,
         }
     }
 }
@@ -233,6 +243,7 @@ impl Session {
         self.floor = None;
         self.floor_note = None;
         self.discovered.clear();
+        self.active_side = None;
         self.mode = None;
         self.turn = TurnState::Idle;
         self.state = RunState::Starting("models".to_string());
@@ -256,9 +267,15 @@ impl Session {
                 self.mode = Some(mode);
                 self.turn = TurnState::Idle;
             }
-            PipelineMsg::TurnStarted => {
+            PipelineMsg::TurnStarted { side } => {
                 self.turn = TurnState::Recording;
                 self.floor_note = None;
+                self.active_side = side;
+            }
+            PipelineMsg::TurnCancelled => {
+                self.turn = TurnState::Idle;
+                self.active_side = None;
+                self.level_db = None;
             }
             PipelineMsg::TurnEnded => {
                 self.turn = TurnState::Processing;
@@ -275,26 +292,30 @@ impl Session {
             PipelineMsg::Final {
                 index,
                 text,
+                lang,
                 speech_ms,
                 asr_ms,
                 ..
             } => self.push(Line::Caption(Caption {
                 index,
-                source_lang: self.languages.0.clone(),
+                source_lang: lang,
+                // Until the translation says what it is in.
                 target_lang: self.languages.1.clone(),
                 source: text,
                 speech_ms,
                 asr_ms,
+                side: self.active_side,
                 ..Default::default()
             })),
             PipelineMsg::Translated {
                 index,
                 target,
+                lang,
                 translate_ms,
-                ..
             } => {
                 if let Some(caption) = self.caption_mut(index) {
                     caption.target = Some(target);
+                    caption.target_lang = lang;
                     caption.translate_ms = Some(translate_ms);
                 }
             }
@@ -379,12 +400,42 @@ impl Session {
                 self.peer = None;
                 self.floor = None;
                 self.discovered.clear();
+                self.active_side = None;
             }
         }
 
         if finishes_turn && self.turn == TurnState::Processing {
             self.turn = TurnState::Idle;
+            self.active_side = None;
         }
+    }
+
+    /// Shared machine: what a press of one side's key should do (decision 3 of
+    /// shared-machine-mode.md). One person at a time: while one side records,
+    /// the other key does nothing; while anything is being worked on or
+    /// spoken, neither does.
+    pub fn shared_press(&self, side: Side) -> SharedPress {
+        if self.state != RunState::Listening || self.mode != Some(ModeKind::Shared) {
+            return SharedPress::Ignore("not listening yet".to_string());
+        }
+        match self.turn {
+            TurnState::Recording if self.active_side == Some(side) => SharedPress::End,
+            TurnState::Recording => {
+                SharedPress::Ignore(format!("the {} person is talking", side.other()))
+            }
+            TurnState::Processing if self.speaking => {
+                SharedPress::Ignore("speaking — wait".to_string())
+            }
+            TurnState::Processing => SharedPress::Ignore("working — wait".to_string()),
+            TurnState::Waiting => SharedPress::Ignore("waiting".to_string()),
+            TurnState::Idle if self.speaking => SharedPress::Ignore("speaking — wait".to_string()),
+            TurnState::Idle => SharedPress::Begin,
+        }
+    }
+
+    /// Shared machine: whether Escape has anything to cancel.
+    pub fn shared_can_cancel(&self) -> bool {
+        self.mode == Some(ModeKind::Shared) && (self.turn != TurnState::Idle || self.speaking)
     }
 
     /// The most recent caption with every stage it went through, for the
@@ -410,6 +461,18 @@ impl Session {
             _ => None,
         })
     }
+}
+
+/// What a shared-machine key press does.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SharedPress {
+    /// Start this side's turn.
+    Begin,
+    /// End this side's turn.
+    End,
+    /// Nothing, and why: shown in the column so a dead key isn't mistaken
+    /// for a bug.
+    Ignore(String),
 }
 
 /// What the turn key did this frame.
@@ -514,6 +577,12 @@ struct App {
     turn_key: egui::Key,
     /// Whether that key is down.
     turn_key_state: TurnKey,
+    /// Shared machine: each side's key and its state, and Escape's.
+    shared_keys: [(Side, egui::Key, TurnKey); 2],
+    escape_state: TurnKey,
+    /// Shared machine: something a side's column must show, such as why its
+    /// key did nothing or that its chosen voice is missing.
+    shared_notes: HashMap<Side, String>,
     /// In hold style, whether the key is down. Tracked here rather than read
     /// from the turn state, so a tap shorter than the pipeline's reply still
     /// ends the turn it began.
@@ -541,6 +610,12 @@ impl App {
             notice: None,
             turn_key: egui::Key::Space,
             turn_key_state: TurnKey::default(),
+            shared_keys: [
+                (Side::Left, egui::Key::ArrowLeft, TurnKey::default()),
+                (Side::Right, egui::Key::ArrowRight, TurnKey::default()),
+            ],
+            escape_state: TurnKey::default(),
+            shared_notes: HashMap::new(),
             holding: false,
             peer_input: config.peer.peer_addr.clone(),
             addresses: Vec::new(),
@@ -548,6 +623,20 @@ impl App {
             root,
             config,
         };
+        // The shared-machine keys can be changed because some keyboards and
+        // foot pedals send other keys; the arrows are the default.
+        for (side, key, _) in &mut app.shared_keys {
+            let name = side.key(&app.config.shared).to_string();
+            match egui::Key::from_name(&name) {
+                Some(named) => *key = named,
+                None => {
+                    app.notice = Some(format!(
+                        "[shared].{side}_key = \"{name}\" is not a key cnverc knows; using {}",
+                        key.name()
+                    ))
+                }
+            }
+        }
         match egui::Key::from_name(&app.config.mode.turn_key) {
             Some(key) => app.turn_key = key,
             None => {
@@ -607,6 +696,55 @@ impl App {
         self.holding = false;
         if let Some(pipeline) = &self.pipeline {
             pipeline.stop();
+        }
+    }
+
+    /// Shared machine: turn the two keys and Escape into turns.
+    fn handle_shared_keys(&mut self, pressed: &[(Side, bool)], escape: bool) {
+        let Some(pipeline) = &self.pipeline else {
+            return;
+        };
+        if escape && self.session.shared_can_cancel() {
+            info!("shared machine: Escape; cancelling");
+            pipeline.send(PipelineCmd::Cancel);
+            return;
+        }
+        for &(side, down) in pressed {
+            if !down {
+                continue;
+            }
+            match self.session.shared_press(side) {
+                SharedPress::End => {
+                    info!("shared machine: {side} key; ending the {side} turn");
+                    pipeline.send(PipelineCmd::EndTurn);
+                }
+                SharedPress::Ignore(why) => {
+                    info!("shared machine: {side} key ignored: {why}");
+                }
+                SharedPress::Begin => {
+                    let recognizer = self.selected_recognizer();
+                    match shared::direction(side, &self.config.shared, recognizer, &self.voices) {
+                        Ok(resolved) => {
+                            match resolved.warning {
+                                Some(warning) => {
+                                    self.shared_notes.insert(side, warning);
+                                }
+                                None => {
+                                    self.shared_notes.remove(&side);
+                                }
+                            }
+                            info!("shared machine: {side} key; starting the {side} turn");
+                            pipeline.send(PipelineCmd::BeginSharedTurn(resolved.direction));
+                        }
+                        Err(why) => {
+                            info!("shared machine: {side} key refused: {why}");
+                            self.shared_notes.insert(side, why);
+                        }
+                    }
+                }
+            }
+            // One press per frame is plenty; a second would only be ignored.
+            break;
         }
     }
 
@@ -1458,12 +1596,51 @@ impl eframe::App for App {
         // take it as a click (SPEC §8). It is consumed whatever state the
         // window is in, so a press meant as a turn never lands on the focused
         // button instead.
-        let key = self.turn_key;
-        let (raw, focused) = ui
-            .ctx()
-            .input_mut(|input| (take_turn_key(input, key), input.focused));
-        let edges = self.turn_key_state.update(raw, focused);
-        self.handle_turn_key(edges, focused);
+        if self.config.mode.kind == ModeKind::Shared {
+            // Arrow keys also move the cursor in a text box: while one has
+            // focus, the keys are its (decision 7). Escape is taken only when
+            // there is something to cancel, so it still closes a dropdown.
+            let typing = ui.ctx().text_edit_focused();
+            let take_escape = !typing && self.session.shared_can_cancel();
+            let keys: Vec<(Side, egui::Key)> = self
+                .shared_keys
+                .iter()
+                .map(|(side, key, _)| (*side, *key))
+                .collect();
+            let (raws, escape_raw, focused) = ui.ctx().input_mut(|input| {
+                let raws: Vec<KeyEdges> = keys
+                    .iter()
+                    .map(|(_, key)| {
+                        if typing {
+                            KeyEdges::default()
+                        } else {
+                            take_turn_key(input, *key)
+                        }
+                    })
+                    .collect();
+                let escape = if take_escape {
+                    take_turn_key(input, egui::Key::Escape)
+                } else {
+                    KeyEdges::default()
+                };
+                (raws, escape, input.focused)
+            });
+            let pressed: Vec<(Side, bool)> = self
+                .shared_keys
+                .iter_mut()
+                .zip(raws)
+                .map(|((side, _, state), raw)| (*side, state.update(raw, focused).pressed))
+                .collect();
+            let escape = self.escape_state.update(escape_raw, focused).pressed;
+            self.handle_shared_keys(&pressed, escape);
+        } else {
+            let key = self.turn_key;
+            let (raw, focused) = ui
+                .ctx()
+                .input_mut(|input| (take_turn_key(input, key), input.focused));
+            let edges = self.turn_key_state.update(raw, focused);
+            self.handle_turn_key(edges, focused);
+        }
 
         egui::Panel::top("top").show(ui, |ui| {
             ui.add_space(6.0);
@@ -1601,6 +1778,7 @@ mod tests {
         PipelineMsg::Final {
             index,
             text: text.to_string(),
+            lang: "es".to_string(),
             speech_ms: 1500,
             asr_ms: 120,
         }
@@ -1614,6 +1792,7 @@ mod tests {
         s.apply(PipelineMsg::Translated {
             index: 1,
             target: "Where is the station?".to_string(),
+            lang: "en".to_string(),
             translate_ms: 340,
         });
         s.apply(PipelineMsg::SpeakingStarted {
@@ -1687,11 +1866,21 @@ mod tests {
 
     #[test]
     fn a_caption_keeps_the_languages_it_was_spoken_in() {
+        // Each caption's source language comes from its own message, and the
+        // target from the run until the translation says otherwise, so
+        // changing the settings between runs never relabels old captions.
+        let final_in = |index, text: &str, lang: &str| PipelineMsg::Final {
+            index,
+            text: text.to_string(),
+            lang: lang.to_string(),
+            speech_ms: 1500,
+            asr_ms: 120,
+        };
         let mut s = Session::default();
         s.begin("en", "es", false, true, false);
-        s.apply(final_msg(1, "Hello."));
+        s.apply(final_in(1, "Hello.", "en"));
         s.begin("es", "en", false, true, false);
-        s.apply(final_msg(2, "Hola."));
+        s.apply(final_in(2, "Hola.", "es"));
 
         let Line::Caption(first) = &s.lines[0] else {
             panic!("a caption")
@@ -1858,7 +2047,7 @@ mod tests {
         s.apply(PipelineMsg::Mode(ModeKind::Turn));
         assert_eq!(s.turn, TurnState::Idle);
 
-        s.apply(PipelineMsg::TurnStarted);
+        s.apply(PipelineMsg::TurnStarted { side: None });
         assert_eq!(s.turn, TurnState::Recording);
         s.apply(PipelineMsg::Level(-20.0));
 
@@ -1870,6 +2059,7 @@ mod tests {
         s.apply(PipelineMsg::Translated {
             index: 1,
             target: "Hello.".to_string(),
+            lang: "en".to_string(),
             translate_ms: 300,
         });
         assert_eq!(
@@ -1901,7 +2091,7 @@ mod tests {
             let mut s = Session::default();
             s.begin("es", "en", false, true, false);
             s.apply(PipelineMsg::Mode(ModeKind::Turn));
-            s.apply(PipelineMsg::TurnStarted);
+            s.apply(PipelineMsg::TurnStarted { side: None });
             s.apply(PipelineMsg::TurnEnded);
             s.apply(ending);
             assert_eq!(s.turn, TurnState::Idle);
@@ -1913,12 +2103,13 @@ mod tests {
         let mut s = Session::default();
         s.begin("es", "en", false, false, false);
         s.apply(PipelineMsg::Mode(ModeKind::Turn));
-        s.apply(PipelineMsg::TurnStarted);
+        s.apply(PipelineMsg::TurnStarted { side: None });
         s.apply(PipelineMsg::TurnEnded);
         s.apply(final_msg(1, "Hola."));
         s.apply(PipelineMsg::Translated {
             index: 1,
             target: "Hello.".to_string(),
+            lang: "en".to_string(),
             translate_ms: 300,
         });
         assert_eq!(s.turn, TurnState::Idle);
@@ -1979,13 +2170,14 @@ mod tests {
         assert_eq!(s.turn, TurnState::Waiting, "the microphone is not open yet");
 
         s.apply(PipelineMsg::FloorChanged(Holder::Me));
-        s.apply(PipelineMsg::TurnStarted);
+        s.apply(PipelineMsg::TurnStarted { side: None });
         assert_eq!(s.turn, TurnState::Recording);
         s.apply(PipelineMsg::TurnEnded);
         s.apply(final_msg(1, "¿Dónde está la estación?"));
         s.apply(PipelineMsg::Translated {
             index: 1,
             target: "Where is the station?".to_string(),
+            lang: "en".to_string(),
             translate_ms: 300,
         });
         assert_eq!(s.turn, TurnState::Idle, "nothing to speak here");
@@ -2054,5 +2246,112 @@ mod tests {
         let mut s = Session::default();
         s.begin("es", "en", true, true, true);
         assert!(!s.paired);
+    }
+
+    fn shared_session() -> Session {
+        let mut s = Session::default();
+        s.begin("es", "en", false, true, false);
+        s.apply(PipelineMsg::Listening);
+        s.apply(PipelineMsg::Mode(ModeKind::Shared));
+        s
+    }
+
+    #[test]
+    fn shared_one_person_at_a_time() {
+        let mut s = shared_session();
+        assert_eq!(s.shared_press(Side::Left), SharedPress::Begin);
+        assert_eq!(s.shared_press(Side::Right), SharedPress::Begin);
+
+        s.apply(PipelineMsg::TurnStarted {
+            side: Some(Side::Left),
+        });
+        assert_eq!(s.active_side, Some(Side::Left));
+        assert_eq!(s.shared_press(Side::Left), SharedPress::End);
+        assert!(
+            matches!(s.shared_press(Side::Right), SharedPress::Ignore(why) if why.contains("left")),
+            "the right key does nothing during the left turn"
+        );
+
+        s.apply(PipelineMsg::TurnEnded);
+        assert!(
+            matches!(s.shared_press(Side::Left), SharedPress::Ignore(why) if why.contains("working"))
+        );
+
+        s.apply(final_msg(1, "Hello."));
+        s.apply(PipelineMsg::Translated {
+            index: 1,
+            target: "Hola.".to_string(),
+            lang: "es".to_string(),
+            translate_ms: 200,
+        });
+        s.apply(PipelineMsg::SpeakingStarted {
+            index: Some(1),
+            first_audio_ms: 900,
+        });
+        for side in [Side::Left, Side::Right] {
+            assert!(
+                matches!(s.shared_press(side), SharedPress::Ignore(why) if why.contains("speaking")),
+                "neither key works while the machine speaks"
+            );
+        }
+
+        s.apply(PipelineMsg::SpeakingEnded);
+        assert_eq!(s.turn, TurnState::Idle);
+        assert_eq!(s.active_side, None);
+        assert_eq!(s.shared_press(Side::Right), SharedPress::Begin);
+    }
+
+    #[test]
+    fn shared_captions_belong_to_their_side_and_carry_their_languages() {
+        let mut s = shared_session();
+        s.apply(PipelineMsg::TurnStarted {
+            side: Some(Side::Right),
+        });
+        s.apply(PipelineMsg::TurnEnded);
+        s.apply(PipelineMsg::Final {
+            index: 3,
+            text: "Hola.".to_string(),
+            lang: "es".to_string(),
+            speech_ms: 800,
+            asr_ms: 400,
+        });
+        s.apply(PipelineMsg::Translated {
+            index: 3,
+            target: "Hello.".to_string(),
+            lang: "en".to_string(),
+            translate_ms: 200,
+        });
+        let Line::Caption(c) = &s.lines[0] else {
+            panic!("a caption")
+        };
+        assert_eq!(c.side, Some(Side::Right));
+        assert_eq!(
+            (c.source_lang.as_str(), c.target_lang.as_str()),
+            ("es", "en")
+        );
+    }
+
+    #[test]
+    fn escape_cancels_only_when_there_is_something_to_cancel() {
+        let mut s = shared_session();
+        assert!(!s.shared_can_cancel(), "Escape must still close a dropdown");
+        s.apply(PipelineMsg::TurnStarted {
+            side: Some(Side::Left),
+        });
+        assert!(s.shared_can_cancel());
+        s.apply(PipelineMsg::TurnCancelled);
+        assert_eq!(s.turn, TurnState::Idle);
+        assert_eq!(s.active_side, None);
+        assert!(!s.shared_can_cancel());
+        assert_eq!(s.shared_press(Side::Right), SharedPress::Begin);
+    }
+
+    #[test]
+    fn shared_keys_do_nothing_outside_shared_mode() {
+        let mut s = Session::default();
+        s.apply(PipelineMsg::Listening);
+        s.apply(PipelineMsg::Mode(ModeKind::Turn));
+        assert!(matches!(s.shared_press(Side::Left), SharedPress::Ignore(_)));
+        assert!(!s.shared_can_cancel());
     }
 }

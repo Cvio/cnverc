@@ -11,11 +11,6 @@
 //! speak it with. It has no window, device or model in it, so every case is
 //! tested directly.
 
-#![allow(
-    dead_code,
-    reason = "used by the window from M7.5 step 3 and the pipeline from step 4"
-)]
-
 use std::fmt;
 
 use crate::config::Shared;

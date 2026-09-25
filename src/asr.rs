@@ -47,7 +47,6 @@ pub trait SegmentAsr {
     /// alternates two languages turn by turn, and calls this for both at
     /// startup so no turn waits on a load. Engines that don't take a language
     /// have nothing to do.
-    #[allow(dead_code, reason = "called by the pipeline from M7.5 step 4")]
     fn prepare(&mut self, _language: &str) -> anyhow::Result<()> {
         Ok(())
     }

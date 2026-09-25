@@ -69,9 +69,103 @@ pub fn run(root: PathBuf, config: Config) -> Result<()> {
     eframe::run_native(
         "cnverc",
         options,
-        Box::new(move |_cc| Ok(Box::new(App::new(root, config)))),
+        Box::new(move |cc| {
+            install_rtl_font(&cc.egui_ctx);
+            Ok(Box::new(App::new(root, config)))
+        }),
     )
     .map_err(|e| anyhow!("the window could not be opened: {e}"))
+}
+
+/// The font family speech in right-to-left scripts (Arabic, Hebrew, Persian,
+/// Urdu) is drawn in. See [`speech`].
+const RTL_FAMILY: &str = "rtl";
+
+/// Fonts with Arabic and Hebrew letters, tried in order. egui's built-in fonts
+/// have neither, and drew an Arabic translation as a row of boxes. cnverc
+/// ships no fonts and downloads nothing, so it borrows one the system has:
+/// Segoe UI or Arial on Windows, Noto Sans Arabic or DejaVu Sans on Linux.
+fn rtl_font_candidates() -> Vec<PathBuf> {
+    let mut candidates = Vec::new();
+    if let Some(windir) = std::env::var_os("WINDIR") {
+        let fonts = PathBuf::from(windir).join("Fonts");
+        candidates.push(fonts.join("segoeui.ttf"));
+        candidates.push(fonts.join("arial.ttf"));
+    }
+    for path in [
+        "/usr/share/fonts/truetype/noto/NotoSansArabic-Regular.ttf",
+        "/usr/share/fonts/noto/NotoSansArabic-Regular.ttf",
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+        "/usr/share/fonts/TTF/DejaVuSans.ttf",
+    ] {
+        candidates.push(PathBuf::from(path));
+    }
+    candidates
+}
+
+/// Makes the [`RTL_FAMILY`] font family, and adds its font as a fallback to
+/// the ordinary one so a stray Arabic word anywhere else is not boxes either.
+///
+/// Why a family of its own rather than only a fallback: egui shapes text in
+/// runs of one font, and the built-in font has the spaces. With the Arabic font
+/// only as a fallback, every word of a sentence becomes its own run, each word
+/// comes out right to left but the words themselves go left to right, so the
+/// sentence reads backwards. In a family whose first font has the Arabic
+/// letters and the spaces and punctuation, the whole line is one run, and the
+/// shaper lays it out right to left.
+fn install_rtl_font(ctx: &egui::Context) {
+    let mut fonts = egui::FontDefinitions::default();
+    let proportional = fonts
+        .families
+        .get(&egui::FontFamily::Proportional)
+        .cloned()
+        .unwrap_or_default();
+    let found = rtl_font_candidates()
+        .into_iter()
+        .find_map(|path| std::fs::read(&path).ok().map(|bytes| (path, bytes)));
+    let mut rtl = proportional.clone();
+    match found {
+        Some((path, bytes)) => {
+            info!("right-to-left text uses {}", path.display());
+            let name = "rtl-system-font".to_string();
+            fonts.font_data.insert(
+                name.clone(),
+                std::sync::Arc::new(egui::FontData::from_owned(bytes)),
+            );
+            rtl.insert(0, name.clone());
+            if let Some(list) = fonts.families.get_mut(&egui::FontFamily::Proportional) {
+                list.push(name);
+            }
+        }
+        None => {
+            // The family must exist either way: egui panics on an unknown one.
+            info!("no font with Arabic letters found; Arabic text will show as boxes");
+        }
+    }
+    fonts
+        .families
+        .insert(egui::FontFamily::Name(RTL_FAMILY.into()), rtl);
+    ctx.set_fonts(fonts);
+}
+
+/// Whether text contains letters of a right-to-left script: Hebrew, Arabic
+/// (with Syriac, Thaana and the rest of that range) and their presentation
+/// forms.
+fn has_rtl(text: &str) -> bool {
+    text.chars()
+        .any(|c| matches!(c as u32, 0x0590..=0x08FF | 0xFB1D..=0xFDFF | 0xFE70..=0xFEFF))
+}
+
+/// Words someone said or a translation of them, in whatever language. Text
+/// with right-to-left letters is drawn in [`RTL_FAMILY`], so it is shaped and
+/// laid out right to left.
+fn speech(text: &str) -> RichText {
+    let rich = RichText::new(text);
+    if has_rtl(text) {
+        rich.family(egui::FontFamily::Name(RTL_FAMILY.into()))
+    } else {
+        rich
+    }
 }
 
 /// Which graphics API draws the window.
@@ -1935,10 +2029,10 @@ fn key_symbol(key: egui::Key) -> String {
 fn shared_card(ui: &mut egui::Ui, c: &Caption) {
     egui::Frame::group(ui.style()).show(ui, |ui| {
         ui.set_width(ui.available_width());
-        ui.label(RichText::new(&c.source).size(18.0));
+        ui.label(speech(&c.source).size(18.0));
         match (&c.target, &c.problem) {
             (Some(text), _) => {
-                ui.label(RichText::new(text).size(18.0).strong());
+                ui.label(speech(text).size(18.0).strong());
             }
             (None, Some(problem)) => {
                 ui.label(
@@ -1968,7 +2062,7 @@ fn caption_card(ui: &mut egui::Ui, c: &Caption) {
         ui.set_width(ui.available_width());
         match (&c.target, &c.problem) {
             (Some(text), _) => {
-                ui.label(RichText::new(text).size(22.0).strong());
+                ui.label(speech(text).size(22.0).strong());
             }
             (None, Some(problem)) => {
                 ui.label(
@@ -1980,7 +2074,7 @@ fn caption_card(ui: &mut egui::Ui, c: &Caption) {
                 ui.label(RichText::new("…").size(22.0).weak());
             }
         }
-        ui.label(RichText::new(&c.source).size(16.0).italics());
+        ui.label(speech(&c.source).size(16.0).italics());
         let mut timing = format!(
             "#{} · {} to {} · {} ms of speech · recognised {} ms",
             c.index, c.source_lang, c.target_lang, c.speech_ms, c.asr_ms
@@ -2013,8 +2107,8 @@ fn remote_card(
         .fill(Color32::from_rgba_unmultiplied(110, 60, 150, 40))
         .show(ui, |ui| {
             ui.set_width(ui.available_width());
-            ui.label(RichText::new(text).size(22.0).strong());
-            ui.label(RichText::new(source_text).size(16.0).italics());
+            ui.label(speech(text).size(22.0).strong());
+            ui.label(speech(source_text).size(16.0).italics());
             ui.small(format!("{from} · {source_lang} to {lang}"));
         });
 }
@@ -2045,9 +2139,9 @@ fn comparison_card(ui: &mut egui::Ui, c: &Comparison, selected: &str) {
                     ui.monospace(format!("{} ms", run.elapsed_ms));
                     if run.ok {
                         ui.label(if run.text.is_empty() {
-                            "(no text)"
+                            RichText::new("(no text)")
                         } else {
-                            &run.text
+                            speech(&run.text)
                         });
                     } else {
                         ui.colored_label(Color32::from_rgb(220, 90, 70), &run.text);
@@ -2071,6 +2165,15 @@ mod tests {
             speech_ms: 1500,
             asr_ms: 120,
         }
+    }
+
+    #[test]
+    fn right_to_left_text_is_told_apart() {
+        assert!(has_rtl("ساعدني في إدخال مشترياتي."));
+        assert!(has_rtl("שלום"));
+        assert!(has_rtl("Uber إلى المطار"));
+        assert!(!has_rtl("¿Dónde está la estación?"));
+        assert!(!has_rtl("Help me get my groceries in."));
     }
 
     #[test]

@@ -89,6 +89,18 @@ fn graphics_setup() -> eframe::egui_wgpu::WgpuSetupCreateNew {
     #[cfg(windows)]
     {
         setup.instance_descriptor.backends = eframe::wgpu::Backends::DX12;
+        // FXC, the shader compiler built into every Windows. wgpu's default
+        // takes any dxcompiler.dll it finds on PATH first: on one PC that was
+        // Wireshark's old copy, which cannot compile wgpu's shaders, and the
+        // window failed with "Parent device is lost". Choosing FXC makes the
+        // window independent of whatever else is installed, and needs no DLL
+        // beside cnverc.exe (SPEC §2.6). egui's few shaders compile quickly
+        // either way.
+        setup
+            .instance_descriptor
+            .backend_options
+            .dx12
+            .shader_compiler = eframe::wgpu::Dx12Compiler::Fxc;
     }
     setup
 }

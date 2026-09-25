@@ -53,6 +53,8 @@ On the left side of the window you choose:
     Space while speaking** instead: hold the key down while you talk and let go when you're
     done.
   - **Listen continuously:** cnverc listens all the time and translates each time you pause.
+  - **Shared machine:** two people, one PC, a key each. See
+    [Two people, one PC](#two-people-one-pc).
 - **Speak translations:** untick this to see captions only, with no voice.
 - **Mute the microphone while speaking:** leave this on when using speakers, so cnverc doesn't
   hear its own voice and translate it again. Turn it off only if you're wearing headphones.
@@ -325,6 +327,43 @@ onnxruntime. The cause and the fix are in
 [TECHNICAL.md → Linux: shared sherpa-onnx](TECHNICAL.md#linux-shared-sherpa-onnx).
 
 ---
+
+## Two people, one PC
+
+With **Shared machine** mode, two people who speak different languages sit at the same PC, one
+on the left and one on the right. Each has their own key: **Left arrow** for the person on the
+left, **Right arrow** for the person on the right.
+
+### Setting it up
+
+1. Under **Mode**, choose **Shared machine**. (It's greyed out while **Pair with another PC**
+   is ticked: untick that first.)
+2. Choose a **Whisper** recognizer. Shared mode tells the recognizer which language to expect,
+   and only Whisper takes that instruction; Parakeet decides the language itself, so the
+   columns say so and won't start a turn.
+3. Above the two columns, choose each person's language. Under each, choose the voice their
+   words are spoken in. That's a voice in the *other* person's language, so the list only shows
+   those. Leave it on "The first installed voice" if you only have one.
+4. Press **Start**.
+
+### Talking
+
+- Press **your** key, speak, and press it again when you've finished. Your column turns red
+  while it listens, amber while it works, and blue while it speaks your words in the other
+  person's language.
+- Only one person at a time. While you're talking, the other key does nothing. While the PC is
+  working or speaking, neither key does, and the microphone is off, so it never translates its
+  own voice. The other column says **Speaking — wait** or **Wait — the other person has the
+  turn**, so a key that does nothing doesn't look broken.
+- **Escape** cancels: it throws away a turn you're recording, or stops a translation being
+  worked on or spoken. Nothing from a cancelled turn is spoken.
+- Each column keeps that person's history: what they said, and what was spoken for them.
+
+The keys only work while no text box has the cursor. If they seem dead, click anywhere outside
+a text box. To use different keys, for a foot pedal for example, set `left_key` and `right_key`
+under `[shared]` in `cnverc.toml`.
+
+Keep the speakers at a normal volume; you don't need headphones in this mode.
 
 ## Talking between two PCs
 

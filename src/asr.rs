@@ -7,6 +7,7 @@
 //! so both traits and the enum exist from here on even though only
 //! [`SegmentAsr`] has implementations yet.
 
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
@@ -41,6 +42,15 @@ pub enum AsrEngine {
 pub trait SegmentAsr {
     /// `pcm` is a complete utterance, 16 kHz mono f32 in [-1.0, 1.0].
     fn transcribe(&mut self, pcm: &[f32], language: &str) -> anyhow::Result<String>;
+
+    /// Get ready to transcribe `language` without delay. Shared-machine mode
+    /// alternates two languages turn by turn, and calls this for both at
+    /// startup so no turn waits on a load. Engines that don't take a language
+    /// have nothing to do.
+    #[allow(dead_code, reason = "called by the pipeline from M7.5 step 4")]
+    fn prepare(&mut self, _language: &str) -> anyhow::Result<()> {
+        Ok(())
+    }
 }
 
 #[allow(dead_code, reason = "implemented in Milestone 8; SPEC §11")]
@@ -187,13 +197,20 @@ impl SegmentAsr for NemoTransducerAsr {
 
 /// Whisper.
 ///
-/// The language is baked into the recognizer at creation, but the trait passes
-/// it per utterance, so a change of language rebuilds the recognizer. That
-/// costs seconds and happens when the user changes a selector, not per
-/// utterance.
+/// The language is baked into a recognizer at creation, and building one
+/// loads the model, which takes seconds. So one recognizer is kept per
+/// language used, built the first time that language is asked for (or when
+/// [`SegmentAsr::prepare`] asks). Shared-machine mode alternates two languages
+/// every turn, and rebuilding on each switch would add seconds to every turn.
+/// The cost is a copy of the model in memory per language, about 1 GB for
+/// large-v3-turbo int8.
+///
+/// sherpa-onnx 1.13.8 can change a Whisper recognizer's language in place
+/// (`SherpaOnnxOfflineRecognizerSetConfig`), but neither the `sherpa-onnx` nor
+/// the `sherpa-onnx-sys` crate binds it, and its Whisper decoder ignores the
+/// per-stream "language" option.
 struct WhisperAsr {
-    recognizer: OfflineRecognizer,
-    language: String,
+    recognizers: HashMap<String, OfflineRecognizer>,
     encoder: String,
     decoder: String,
     tokens: String,
@@ -214,14 +231,14 @@ impl WhisperAsr {
             .unwrap_or_else(|| "en".to_string());
 
         let recognizer = Self::build(&encoder, &decoder, &tokens, &language, &engine.dir)?;
+        let recognizers = HashMap::from([(language, recognizer)]);
         info!(
             "\"{}\" is Whisper: it pads every utterance to 30 s internally, so a 1 s utterance \
              costs about what a 20 s one does",
             engine.dir_name
         );
         Ok(Self {
-            recognizer,
-            language,
+            recognizers,
             encoder,
             decoder,
             tokens,
@@ -260,24 +277,49 @@ impl WhisperAsr {
     }
 }
 
-impl SegmentAsr for WhisperAsr {
-    fn transcribe(&mut self, pcm: &[f32], language: &str) -> Result<String> {
-        if !language.is_empty() && language != self.language {
-            info!(
-                "\"{}\": rebuilding the recognizer for language \"{language}\"",
-                self.name
-            );
-            self.recognizer = Self::build(
+impl WhisperAsr {
+    /// The recognizer for `language`, built now if it has not been yet. An
+    /// empty language means whichever one is already built.
+    fn recognizer(&mut self, language: &str) -> Result<&OfflineRecognizer> {
+        if language.is_empty() {
+            return self
+                .recognizers
+                .values()
+                .next()
+                .ok_or_else(|| anyhow!("\"{}\" has no recognizer", self.name));
+        }
+        if !self.recognizers.contains_key(language) {
+            let began = std::time::Instant::now();
+            let recognizer = Self::build(
                 &self.encoder,
                 &self.decoder,
                 &self.tokens,
                 language,
                 &self.dir,
             )?;
-            self.language = language.to_string();
+            info!(
+                "\"{}\": built a recognizer for \"{language}\" in {} ms; {} language(s) now loaded",
+                self.name,
+                began.elapsed().as_millis(),
+                self.recognizers.len() + 1
+            );
+            self.recognizers.insert(language.to_string(), recognizer);
         }
-        decode(&self.recognizer, pcm)
-            .with_context(|| format!("\"{}\" failed to transcribe", self.name))
+        self.recognizers
+            .get(language)
+            .ok_or_else(|| anyhow!("\"{}\" has no recognizer for \"{language}\"", self.name))
+    }
+}
+
+impl SegmentAsr for WhisperAsr {
+    fn transcribe(&mut self, pcm: &[f32], language: &str) -> Result<String> {
+        let name = self.name.clone();
+        let recognizer = self.recognizer(language)?;
+        decode(recognizer, pcm).with_context(|| format!("\"{name}\" failed to transcribe"))
+    }
+
+    fn prepare(&mut self, language: &str) -> Result<()> {
+        self.recognizer(language).map(|_| ())
     }
 }
 
@@ -285,6 +327,42 @@ impl SegmentAsr for WhisperAsr {
 mod tests {
     use super::*;
     use crate::models::{self, Role};
+
+    /// Whisper keeps a recognizer per language, so alternating languages turn
+    /// by turn (shared-machine mode) never waits on a model load.
+    ///
+    /// ```bash
+    /// CNVERC_TEST_MODELS=/abs/path/models \
+    /// CNVERC_TEST_WAV_ES=/abs/path/spanish-16k.wav \
+    /// cargo test --release -- --ignored --nocapture alternates
+    /// ```
+    #[test]
+    #[ignore = "needs the Whisper model and a Spanish recording; see the doc comment"]
+    fn whisper_alternates_languages_without_reloading() {
+        let models_root = std::env::var("CNVERC_TEST_MODELS").expect("CNVERC_TEST_MODELS");
+        let wav = std::env::var("CNVERC_TEST_WAV_ES").expect("CNVERC_TEST_WAV_ES");
+        let pcm = crate::wav::read_16k_mono(Path::new(&wav)).expect("read the recording");
+        let engine = models::discover(&Path::new(&models_root).join("asr"), Role::Asr)
+            .into_iter()
+            .find_map(|e| match e {
+                models::Entry::Loaded(e) if e.dir_name == "whisper-large-v3-turbo" => Some(e),
+                _ => None,
+            })
+            .expect("whisper-large-v3-turbo is installed");
+        let mut whisper = WhisperAsr::load(&engine).expect("load");
+        whisper.prepare("en").expect("prepare English");
+        whisper.prepare("es").expect("prepare Spanish");
+        assert_eq!(whisper.recognizers.len(), 2);
+
+        for language in ["en", "es", "en", "es"] {
+            let began = std::time::Instant::now();
+            let text = whisper.transcribe(&pcm, language).expect("transcribe");
+            println!("{language}: {} ms: {text}", began.elapsed().as_millis());
+        }
+        assert_eq!(whisper.recognizers.len(), 2, "a language was built twice");
+        let spanish = whisper.transcribe(&pcm, "es").expect("transcribe");
+        assert!(spanish.to_lowercase().contains("país"), "{spanish}");
+    }
 
     /// Both engines against the same Spanish utterance, which is Milestone 2's
     /// check. Needs a models tree and a 16 kHz mono recording:

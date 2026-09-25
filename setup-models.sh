@@ -14,7 +14,7 @@
 # It is safe to run again: anything already downloaded is skipped, so if it
 # stops partway through, run it again and it picks up where it left off.
 #
-# About 2.3 GB in total. Works in Git Bash on Windows and in a Linux shell.
+# About 2.4 GB in total. Works in Git Bash on Windows and in a Linux shell.
 
 set -u
 
@@ -101,13 +101,22 @@ else
   unpack "$DL/voice-es.tar.bz2" "$MODELS/tts"
 fi
 
+say "Mexican Spanish voice (67 MB) — a second Spanish voice, higher quality"
+if [ -d "$MODELS/tts/vits-piper-es_MX-claude-high" ] &&
+   [ -s "$MODELS/tts/vits-piper-es_MX-claude-high/es_MX-claude-high.onnx" ]; then
+  printf '    already have the Mexican Spanish voice\n'
+else
+  fetch "$BASE_TTS/vits-piper-es_MX-claude-high.tar.bz2" "$DL/voice-es-mx.tar.bz2" &&
+  unpack "$DL/voice-es-mx.tar.bz2" "$MODELS/tts"
+fi
+
 printf '\n'
 if [ "$failed" -ne 0 ]; then
   printf 'Some downloads did not finish. Run this script again to retry just those.\n'
   exit 1
 fi
 
-printf 'All six downloaded into %s\n' "$MODELS"
+printf 'All seven downloaded into %s\n' "$MODELS"
 printf 'Now check them with:   %s/cnverc --report\n' "$DEST"
 printf '(on Windows: %s/cnverc.exe --report)\n' "$DEST"
 printf 'When the report is clean you can delete the %s folder.\n' "$DL"

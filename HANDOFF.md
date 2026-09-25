@@ -2,8 +2,10 @@
 
 Written 2026-09-19 at the end of a long Windows session, for a new session starting on the
 user's Linux PC. Read this first, then `CLAUDE.md` (the hard constraints and the working
-rules), then `SPEC.md` (the build specification). `README.md` is the user's setup guide, and
-`TECHNICAL.md` covers design and internals.
+rules), then `SPEC.md` (the build specification). `README.md` is the user's setup guide
+(built around `check-setup.sh`, `setup.sh` and, on Linux, `build-sherpa-linux.sh`),
+`USE-CASES.md` covers situations and workflows, `ARCHITECTURE.md` is the map of the code for a
+developer, and `TECHNICAL.md` covers design decisions and build internals.
 
 ## 1. What cnverc is
 

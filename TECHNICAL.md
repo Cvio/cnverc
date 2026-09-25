@@ -29,31 +29,8 @@ sherpa-onnx build; see "Linux: shared sherpa-onnx" under Building.
 
 ## Architecture
 
-```
-mic ─► capture ─► VAD ─► ASR ─► translate ─┬─► speak ─► playback ─► speakers
-       (cpal)   (Silero)  │     (llama.cpp) │   (Piper)   (cpal)
-                          │                 └─► peer ◄──► the other PC (text only)
-                          └──────► PipelineMsg ──────► window / terminal
-```
-
-Threads, connected by bounded channels:
-
-- **Capture** runs the cpal input callback. It resamples to 16 kHz mono once, at the capture
-  boundary. Nothing downstream resamples again.
-- **Pipeline** (`pipeline.rs`) runs the VAD and ASR, and takes `PipelineCmd`s (mode changes,
-  turn start and end).
-- **Translate** runs MT, so a slow token stream can't stall recognition. It hands each
-  translation to the speaker (solo) or to the peer (paired).
-- **Speak** runs TTS for everything this PC says: its own translations when solo, and the
-  other PC's utterances when paired. The voice is chosen per utterance by its language.
-- **Playback** runs the cpal output and the half-duplex `Gate`.
-- **Peer** (`peer.rs`), only when paired, owns the connection, the handshake and the floor.
-  It has helpers: an acceptor, one dialler per Connect, and a reader per connection. A stalled
-  or dead peer can't block capture, recognition or the window.
-
-The front ends, `gui.rs` (the window) and `listen.rs` (`--listen`), receive `PipelineMsg`
-only. What those messages do to the window lives in `gui::Session`, which contains no egui
-and is unit-tested directly.
+How the modules fit together, the threads and messages, and a turn traced end to end are in
+[ARCHITECTURE.md](ARCHITECTURE.md). What follows here are the design decisions behind them.
 
 Details worth knowing:
 
@@ -72,7 +49,9 @@ Details worth knowing:
   received utterance's own `lang`, never inferred.
 - **Recognition and translation each use 6 threads.**
 - The window renders with **DirectX 12** on Windows. The Vulkan backend logged loader errors
-  at startup.
+  at startup. It uses **FXC**, the shader compiler built into Windows: wgpu's default takes any
+  `dxcompiler.dll` on PATH first, and Wireshark's old copy made the window fail with "Parent
+  device is lost". With FXC, no DLL has to sit beside `cnverc.exe`.
 
 ## What the translation stage refuses
 

@@ -87,7 +87,7 @@ pub fn format_table(comparison: &Comparison, selected_engine: &str) -> String {
     let mut out = String::new();
     let _ = writeln!(
         out,
-        "utterance {} at {} ms — {} ms of audio",
+        "utterance {} at {} ms - {} ms of audio",
         comparison.utterance_index, comparison.start_ms, comparison.segment_ms
     );
 

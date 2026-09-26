@@ -529,11 +529,11 @@ impl Session {
                 SharedPress::Ignore(format!("the {} person is talking", side.other()))
             }
             TurnState::Processing if self.speaking => {
-                SharedPress::Ignore("speaking — wait".to_string())
+                SharedPress::Ignore("speaking - wait".to_string())
             }
-            TurnState::Processing => SharedPress::Ignore("working — wait".to_string()),
+            TurnState::Processing => SharedPress::Ignore("working - wait".to_string()),
             TurnState::Waiting => SharedPress::Ignore("waiting".to_string()),
-            TurnState::Idle if self.speaking => SharedPress::Ignore("speaking — wait".to_string()),
+            TurnState::Idle if self.speaking => SharedPress::Ignore("speaking - wait".to_string()),
             TurnState::Idle => SharedPress::Begin,
         }
     }
@@ -1043,7 +1043,7 @@ impl App {
                 ui.add_space(4.0);
                 ui.label("Found on this network:");
                 for found in self.session.discovered.clone() {
-                    let label = format!("{} — {}", found.name, found.addr.ip());
+                    let label = format!("{} - {}", found.name, found.addr.ip());
                     if ui
                         .add_enabled(self.can_connect(), egui::Button::new(label))
                         .clicked()
@@ -1171,9 +1171,9 @@ impl App {
             (RunState::Starting(_), ..) => ("LOADING…".to_string(), GREY),
             (RunState::Listening, Some(ModeKind::Turn), TurnState::Recording) => (
                 if hold {
-                    format!("● RECORDING — release {key} to finish")
+                    format!("● RECORDING - release {key} to finish")
                 } else {
-                    format!("● RECORDING — press {key} to finish")
+                    format!("● RECORDING - press {key} to finish")
                 },
                 RED,
             ),
@@ -1193,9 +1193,9 @@ impl App {
             }
             (RunState::Listening, Some(ModeKind::Turn), TurnState::Idle) => (
                 if hold {
-                    format!("READY — hold {key} to talk")
+                    format!("READY - hold {key} to talk")
                 } else {
-                    format!("READY — press {key} to talk")
+                    format!("READY - press {key} to talk")
                 },
                 SLATE,
             ),
@@ -1350,7 +1350,7 @@ impl App {
                                 egui::Button::selectable(
                                     false,
                                     format!(
-                                        "{} — missing: {}",
+                                        "{} - missing: {}",
                                         engine.name,
                                         engine.missing_files().join(", ")
                                     ),
@@ -1364,7 +1364,7 @@ impl App {
                         Entry::Failed { dir_name, error } => {
                             ui.add_enabled(
                                 false,
-                                egui::Button::selectable(false, format!("{dir_name} — broken")),
+                                egui::Button::selectable(false, format!("{dir_name} - broken")),
                             )
                             .on_disabled_hover_text(error.to_string());
                         }
@@ -1744,16 +1744,16 @@ impl App {
             )
         } else if mine {
             match s.turn {
-                TurnState::Recording => (format!("● Listening — press {key} to finish"), RED),
+                TurnState::Recording => (format!("● Listening - press {key} to finish"), RED),
                 _ if s.speaking => ("Speaking".to_string(), BLUE),
                 _ => ("Working…".to_string(), AMBER),
             }
         } else if s.speaking {
-            ("Speaking — wait".to_string(), IDLE)
+            ("Speaking - wait".to_string(), IDLE)
         } else if s.turn != TurnState::Idle {
-            ("Wait — the other person has the turn".to_string(), IDLE)
+            ("Wait - the other person has the turn".to_string(), IDLE)
         } else {
-            (format!("Ready — press {key}"), GREEN)
+            (format!("Ready - press {key}"), GREEN)
         };
 
         // Why this side can't take a turn, worked out now so it shows before
@@ -1781,7 +1781,7 @@ impl App {
             .show(ui, |ui| {
                 ui.set_width(ui.available_width());
                 ui.label(
-                    RichText::new(format!("{} — {key}", language_name(language)))
+                    RichText::new(format!("{} - {key}", language_name(language)))
                         .size(34.0)
                         .strong()
                         .color(Color32::WHITE),
@@ -2120,7 +2120,7 @@ fn comparison_card(ui: &mut egui::Ui, c: &Comparison, selected: &str) {
         ui.set_width(ui.available_width());
         ui.label(
             RichText::new(format!(
-                "Utterance #{} — {} ms of audio",
+                "Utterance #{} - {} ms of audio",
                 c.utterance_index, c.segment_ms
             ))
             .strong(),

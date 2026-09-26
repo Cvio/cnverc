@@ -211,12 +211,12 @@ asks you to check the configure output for `location_onnxruntime_lib: /usr/lib/.
 if it says `Downloading pre-compiled onnxruntime` instead. Without a distribution package the
 options are to build onnxruntime from source, or to try sherpa-onnx's own
 `linux-x64-shared-lib` release archive, which bundles a matching onnxruntime and would remove
-the distribution dependency entirely — untested here, and the obvious next experiment if Linux
+the distribution dependency entirely - untested here, and the obvious next experiment if Linux
 is to be supported properly.
 
 **Version skew is untested.** The pairing verified here is sherpa-onnx 1.13.8 (released against
-onnxruntime 1.28) with Ubuntu's 1.23. An older packaged onnxruntime — Debian trixie ships
-roughly 1.16 — may fail to compile, or compile and then fail on an operator used by the Whisper
+onnxruntime 1.28) with Ubuntu's 1.23. An older packaged onnxruntime - Debian trixie ships
+roughly 1.16 - may fail to compile, or compile and then fail on an operator used by the Whisper
 or Parakeet graphs. Nobody has tried it.
 
 Build on a small machine with `-j2` (for both `cargo` and sherpa-onnx's `cmake --build`). A fully
@@ -399,7 +399,7 @@ server, so names are refused rather than looked up.
 force-released and both windows show the disconnected state. Verified on 2026-09-20 between
 the Windows PC and `ubox` over Wi-Fi, by disabling the adapter on one machine mid-session:
 both ends reported the loss and the floor was released. A disabled adapter and a pulled cable
-are the same case here — nothing arrives either way, and only the missed pings reveal it.
+are the same case here - nothing arrives either way, and only the missed pings reveal it.
 
 Pairing was checked again the same day over a **direct Ethernet cable between the two PCs**,
 with Wi-Fi switched off on both: no router, no DHCP server and nothing upstream on the segment.

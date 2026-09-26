@@ -25,7 +25,7 @@ pub enum Command {
 }
 
 pub const HELP: &str = "\
-cnverc — offline speech-to-speech translation
+cnverc - offline speech-to-speech translation
 
 USAGE:
     cnverc [COMMAND]

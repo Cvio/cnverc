@@ -1,8 +1,8 @@
 //! Voice activity detection: Silero through sherpa-onnx.
 //!
-//! sherpa's `VoiceActivityDetector` does the segmenting itself — it is fed
+//! sherpa's `VoiceActivityDetector` does the segmenting itself - it is fed
 //! fixed windows and hands back complete speech segments with their start
-//! offset — so cnverc does not run a second segmentation state machine on top
+//! offset - so cnverc does not run a second segmentation state machine on top
 //! of it. The `[vad]` keys in `cnverc.toml` map straight onto its config.
 //!
 //! In turn-based mode (Milestone 6) this same detector is used only to trim

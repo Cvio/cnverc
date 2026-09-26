@@ -1,4 +1,4 @@
-# CLAUDE.md — `cnverc`
+# CLAUDE.md - `cnverc`
 
 `SPEC.md` is the build specification. Read it before changing anything. This file exists so
 the constraints below survive into sessions that have not read it.
@@ -16,7 +16,7 @@ loses. If you believe one of these is wrong, stop and say so rather than working
 
    **Local network sockets are explicitly permitted and required** for paired mode (SPEC §9):
    TCP and UDP to a peer address the user has entered or that was discovered on the local
-   link. This is not an exception to the rule above — it introduces no internet dependency,
+   link. This is not an exception to the rule above - it introduces no internet dependency,
    and paired mode must work on a network with no gateway and no upstream at all. What is
    forbidden is *reaching the internet*, not *opening a socket*.
 
@@ -115,7 +115,7 @@ M7's check passed on 2026-09-20, between the user's Windows PC and `ubox`: a tur
 Spanish/English conversation with translations arriving and being spoken on the far side, and
 an abruptly killed link force-releasing the floor with an understandable message on both ends.
 The check was run over a local Wi-Fi network, disabling the adapter on one machine rather than
-pulling a cable — the same test of the ping-based detection, and closer to how it will be used.
+pulling a cable - the same test of the ping-based detection, and closer to how it will be used.
 
 ## What the translation stage refuses
 
@@ -123,14 +123,14 @@ A 0.6B model fails in ways that are worse than failing visibly, so three
 guards in `translate.rs` reject an output rather than let it be captioned and
 spoken: an echo of the source, a recitation of the system prompt, and an
 output far longer than its input. All three were found in live sessions, not
-imagined. Do not remove one without a replacement — the failure it prevents
+imagined. Do not remove one without a replacement - the failure it prevents
 is a caption and a voice asserting something the speaker never said.
 
 ## Build note
 
 Everything links against the **static CRT** (`.cargo/config.toml`). sherpa-onnx's prebuilt
 library is `/MT` and llama.cpp defaults to `/MD`; MSVC will not link both. Do not "fix" a
-RuntimeLibrary mismatch by switching sherpa to the dynamic build — the static CRT is also what
+RuntimeLibrary mismatch by switching sherpa to the dynamic build - the static CRT is also what
 keeps the executable free of any Visual C++ redistributable dependency, which §2.6 requires.
 For the same reason `llama-cpp-2` is built without its default `openmp` feature.
 

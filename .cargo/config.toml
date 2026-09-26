@@ -23,7 +23,7 @@ CMAKE_MSVC_RUNTIME_LIBRARY = "MultiThreaded"
 # crate, and `cc` chooses /MT or /MD from the Rust target feature rather than
 # from anything cmake was told. Asking for the static CRT here settles it for
 # every C and C++ object in the build at once, and the executable then has no
-# dependency on the Visual C++ redistributable at all — which is what
+# dependency on the Visual C++ redistributable at all - which is what
 # "unzip it on a freshly imaged machine and it runs" requires (SPEC §2.6).
 #
 # Windows only: the Linux path (a nice-to-have, SPEC §3) is left alone.

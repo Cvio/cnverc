@@ -1,6 +1,6 @@
 //! WAV files, for ears and for tests.
 //!
-//! cnverc does not need WAV at runtime — it exists so a captured utterance
+//! cnverc does not need WAV at runtime - it exists so a captured utterance
 //! can be played back and judged by a human (Milestone 1's check) and so the
 //! dual-run harness (SPEC §12) has something to feed.
 

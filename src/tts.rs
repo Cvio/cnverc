@@ -150,7 +150,7 @@ impl Voice {
 
 /// Pick the voice for a language: the discovered model that declares it.
 ///
-/// Never substitutes a voice in another language (SPEC §15) — being told that
+/// Never substitutes a voice in another language (SPEC §15) - being told that
 /// no English voice is installed is more useful than hearing Spanish.
 pub fn for_language<'a>(engines: &'a [Engine], language: &str) -> Result<&'a Engine> {
     let usable: Vec<&Engine> = engines.iter().filter(|e| e.enabled()).collect();

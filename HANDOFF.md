@@ -200,14 +200,14 @@ configured `source`, and the echo guard behaved correctly.
 
 Filed, not started, and not part of any milestone: a **voice picker**. Installing a second
 Spanish voice (`vits-piper-es_MX-claude-high`, 2026-09-20) means two TTS entries declare
-`languages = ["es"]`, and `for_language` has no tiebreak and no config key — whichever it
+`languages = ["es"]`, and `for_language` has no tiebreak and no config key - whichever it
 picks is arbitrary and the user can't change it. The likely shape is the same as the
 recognizer picker: list installed voices for the target language by their `engine.toml`
 `name`, save the choice in `cnverc.toml`. Note that the descriptor parser **rejects unknown
 fields**, so a `variety = "es-MX"` key cannot be added to an `engine.toml` until `models.rs`
 declares it.
 
-Also filed, not started, none of them urgent — three defects in the **peer panel**, found on
+Also filed, not started, none of them urgent - three defects in the **peer panel**, found on
 2026-09-20 while pairing the Windows PC and `ubox` over a direct Ethernet cable. The pairing
 itself worked throughout; none of these stop a connection.
 
@@ -219,11 +219,11 @@ itself worked throughout; none of these stop a connection.
    address to type. That machine has two ExpressVPN adapters in a "Not Present" state, which is
    the obvious suspect but unconfirmed. Related but separate: line ~1057's `.unwrap_or_default()`
    turns a failed enumeration into an empty list, so a real error becomes indistinguishable from
-   "no interfaces" — latent here, since the call succeeded.
+   "no interfaces" - latent here, since the call succeeded.
 
 2. **"No network connection" is asserted while connected.** The `addresses.is_empty()` branch in
    `gui::peer_panel` prints "No network connection. Plug in a cable or join a network, then
-   Rescan" — and did so with a live pairing shown two lines above it. An empty list means cnverc
+   Rescan" - and did so with a live pairing shown two lines above it. An empty list means cnverc
    found no addresses, not that the machine has no network; the wording should say that, and the
    message should be suppressed entirely when `session.peer` is connected. As written it would
    send someone to re-seat a working cable.

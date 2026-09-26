@@ -7,7 +7,7 @@
 //! * The prompt says translate and only translate, in the model's own chat
 //!   format, with the sentence quarantined in a user turn.
 //! * Qwen3 is a reasoning model, so the assistant turn is opened with an empty
-//!   `<think></think>` block — the documented way to turn reasoning off. If it
+//!   `<think></think>` block - the documented way to turn reasoning off. If it
 //!   thinks anyway, [`clean`] drops the block.
 //! * Whatever comes back is stripped of preambles, labels and wrapping quotes
 //!   before anyone downstream sees it.

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# check-setup.sh — is this PC ready to build cnverc?
+# check-setup.sh - is this PC ready to build cnverc?
 #
 # Checks the tools the build needs and says, for anything missing, exactly
 # what to do about it. It changes nothing on your PC.

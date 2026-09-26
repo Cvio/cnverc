@@ -1,4 +1,4 @@
-# SPEC.md — `cnverc`
+# SPEC.md - `cnverc`
 
 **Read this entire file before writing any code.** This is a build specification, not a
 suggestion list. The constraints in §2 are the reason the project exists; violating one of
@@ -49,7 +49,7 @@ loses. If you believe one of these is wrong, stop and say so rather than working
 
    **Local network sockets are explicitly permitted and required** for paired mode (§9):
    TCP and UDP to a peer address the user has entered or that was discovered on the local
-   link. This is not an exception to the rule above — it introduces no internet dependency,
+   link. This is not an exception to the rule above - it introduces no internet dependency,
    and paired mode must work on a network with no gateway and no upstream at all. What is
    forbidden is *reaching the internet*, not *opening a socket*.
 
@@ -93,7 +93,7 @@ Windows target rather than debugging it.
 
 ---
 
-## 4. Stack — decided, not open
+## 4. Stack - decided, not open
 
 | Concern | Choice | Notes |
 |---|---|---|
@@ -103,7 +103,7 @@ Windows target rather than debugging it.
 | GUI | `eframe` / `egui` | Immediate-mode, compiled in, no webview |
 | Audio I/O | `cpal` | Capture and playback |
 | Peer transport | `std::net` / `tokio` TCP | Plain sockets, no framework |
-| Peer discovery | `mdns-sd` *or* raw UDP broadcast | Convenience only — never the sole path in |
+| Peer discovery | `mdns-sd` *or* raw UDP broadcast | Convenience only - never the sole path in |
 | Config | `toml` + `serde` | One file, §7 |
 | Errors | `anyhow` in app code, `thiserror` at library boundaries | |
 | Logging | `tracing` + `tracing-subscriber` | stdout and `./logs/` |
@@ -111,7 +111,7 @@ Windows target rather than debugging it.
 ### On sherpa-onnx specifically
 
 `sherpa-onnx` wraps the sherpa-onnx C API with RAII Rust types. It provides
-`VoiceActivityDetector` (Silero), `OfflineRecognizer` (whole-utterance ASR — both Whisper and
+`VoiceActivityDetector` (Silero), `OfflineRecognizer` (whole-utterance ASR - both Whisper and
 Parakeet live here), `OnlineRecognizer` (true streaming ASR), and `OfflineTts`. It **links
 statically by default**, which is why we chose it: no `onnxruntime.dll` to ship beside the
 binary.
@@ -167,7 +167,7 @@ cnverc/
 ### Path resolution rule
 
 All of the above resolve from `std::env::current_exe()`, canonicalized, parent directory.
-**Never from the current working directory** — double-clicking from Explorer and launching
+**Never from the current working directory** - double-clicking from Explorer and launching
 from a shell must behave identically. Exactly one such function exists, and no other path
 derivation appears anywhere in the codebase:
 
@@ -180,7 +180,7 @@ fn app_root() -> anyhow::Result<PathBuf> {
 
 ---
 
-## 6. Model discovery — the filesystem is the index
+## 6. Model discovery - the filesystem is the index
 
 Each ASR and TTS model directory contains an `engine.toml` describing itself. `cnverc`
 enumerates subdirectories of `models/asr/` at startup, parses each `engine.toml`, and
@@ -220,7 +220,7 @@ Validation rules:
 
 - A directory missing `engine.toml` is skipped, with a warning naming the directory.
 - A directory whose `engine.toml` references a file that is not present is listed in the UI but
-  **disabled**, with the missing filename shown. Do not silently hide it — the user's most
+  **disabled**, with the missing filename shown. Do not silently hide it - the user's most
   likely question is "why isn't my model in the list", and the answer must be on screen.
 - Unknown `backend` values are a hard error for that entry at load time, not a panic.
 
@@ -302,12 +302,12 @@ turn closes it and flushes whatever was captured as a single utterance.
   processing indicator, each distinguishable at a glance from across a desk.
 
 In turn-based mode, VAD is used only for trimming leading and trailing silence from the captured
-turn, not for deciding utterance boundaries. The user decided the boundary — that is the point of
+turn, not for deciding utterance boundaries. The user decided the boundary - that is the point of
 the mode.
 
 ---
 
-## 9. Paired mode — two machines, one conversation
+## 9. Paired mode - two machines, one conversation
 
 Two instances of `cnverc` on a local network act as the two ends of a conversation. Person A
 speaks Spanish into laptop A; laptop B displays and speaks the English.
@@ -357,7 +357,7 @@ development.
 ### Connection model
 
 Each instance listens on `peer.listen_addr`. To pair, the user enters the other machine's
-address in `peer.peer_addr` and connects. Once established the link is symmetric — there is no
+address in `peer.peer_addr` and connects. Once established the link is symmetric - there is no
 client and no server role beyond who dialled. Exactly one peer connection at a time; reject a
 second inbound connection with a clear message rather than queueing it.
 
@@ -371,7 +371,7 @@ microphone is live only for the peer holding the floor.**
 - If both request simultaneously, the peer whose `name` sorts lexicographically first wins;
   the loser's UI shows that the other party has the floor. Deterministic, no negotiation.
 - If a `FloorGrant` does not arrive within 2 seconds, fail the turn visibly. Never open the
-  microphone on a timeout — that is how both ends end up talking at once.
+  microphone on a timeout - that is how both ends end up talking at once.
 - The floor is force-released if the connection drops.
 
 This is not only turn-taking etiquette. It closes the acoustic feedback path (§10) for free:
@@ -508,7 +508,7 @@ mono f32.
 ## 12. Dual-run comparison harness
 
 Keep the last N (default 20) utterances' raw PCM in a ring buffer keyed by timestamp. Provide a
-debug mode — CLI flag `--compare`, and a toggle in the UI — that runs a captured utterance
+debug mode - CLI flag `--compare`, and a toggle in the UI - that runs a captured utterance
 through every enabled `segment`-kind engine and displays, side by side: the transcript, wall
 clock milliseconds, and segment duration.
 
@@ -523,51 +523,51 @@ and accent. The harness is how we get real numbers for this use case.
 Each milestone is independently runnable and independently verifiable. **Do not start the next
 one until the stated check passes.** Commit at each boundary.
 
-**M0 — Skeleton and model discovery.** Cargo project, `app_root()`, config load, model directory
+**M0 - Skeleton and model discovery.** Cargo project, `app_root()`, config load, model directory
 enumeration and `engine.toml` parsing. No audio, no models loaded.
 *Check:* the binary prints a table of every discovered ASR and TTS model, its kind, its backend,
 and whether all declared files are present. Moving the binary and `models/` to another drive
 changes nothing.
 
-**M1 — Capture and VAD.** cpal input, device enumeration, resample to 16 kHz mono, Silero VAD via
+**M1 - Capture and VAD.** cpal input, device enumeration, resample to 16 kHz mono, Silero VAD via
 sherpa-onnx.
 *Check:* speaking logs segment start and end with durations matching reality; silence produces
 nothing; segment PCM written to a `.wav` plays back as a clean utterance.
 
-**M2 — Segment ASR, both engines, and the harness.** `SegmentAsr` for Parakeet and Whisper,
+**M2 - Segment ASR, both engines, and the harness.** `SegmentAsr` for Parakeet and Whisper,
 driven by M1 segments. Engine selection from config. Ring buffer and `--compare`.
 *Check:* Spanish speech produces Spanish transcripts from both engines; `--compare` prints both
 transcripts with timings for the same audio.
 
-**M3 — Translation.** `llama-cpp-2` loading the GGUF, behind a `Translator` trait. Prompt
-constrained to translation only — the model must not answer the sentence. Strip any reasoning or
+**M3 - Translation.** `llama-cpp-2` loading the GGUF, behind a `Translator` trait. Prompt
+constrained to translation only - the model must not answer the sentence. Strip any reasoning or
 preamble from the output.
 *Check:* Spanish in, English out, on the console, end to end from the microphone.
 
-**M4 — TTS and half-duplex.** `OfflineTts`, playback via cpal, `SpeakingStarted`/`Ended`, the
+**M4 - TTS and half-duplex.** `OfflineTts`, playback via cpal, `SpeakingStarted`/`Ended`, the
 half-duplex gate.
 *Check:* speak Spanish with speakers on at normal volume; the system does not transcribe its own
 output. Measure and log time-to-first-audio.
 
-**M5 — GUI.** egui: engine selector populated from discovery, language selectors, device pickers,
+**M5 - GUI.** egui: engine selector populated from discovery, language selectors, device pickers,
 start/stop, scrolling caption pane showing source and target, latency readout, compare toggle.
 *Check:* everything from M0–M4 is reachable without touching the config file or the command line.
 
-**M6 — Modes and the turn key.** Continuous/turn-based selector, spacebar handling with both
+**M6 - Modes and the turn key.** Continuous/turn-based selector, spacebar handling with both
 toggle and hold styles, the three-state visual indicator, VAD demoted to silence-trimming in
 turn mode.
 *Check:* in turn mode the microphone is provably closed between turns (speak while idle, nothing
 happens); a toggled turn captures a full multi-sentence utterance; spacebar never activates a
 focused widget.
 
-**M7 — Paired mode.** Listener, dialler, `Hello` handshake, `Utterance` exchange, floor token,
+**M7 - Paired mode.** Listener, dialler, `Hello` handshake, `Utterance` exchange, floor token,
 peer panel in the UI showing local interface addresses and their IPs, the firewall diagnostic,
 the continuous-mode headset warning. Discovery last, and only after manual entry works.
 *Check:* two laptops on an isolated switch with no internet hold a turn-based Spanish/English
 conversation; unplugging the WAN uplink changes nothing; pulling the cable mid-session
 force-releases the floor and shows a disconnected state on both ends.
 
-**M7.5 — Shared-machine mode.** Added after M7 and built before M8; the numbering of M8 and
+**M7.5 - Shared-machine mode.** Added after M7 and built before M8; the numbering of M8 and
 M9 is unchanged. Two people who speak different languages use **one** machine, each with a
 key (the arrows by default, `[shared]` above). The key says who is talking and so which
 language they speak: that language goes to the recognizer explicitly, and nothing is detected,
@@ -584,13 +584,13 @@ language used for every turn; the other key does nothing during a turn; Escape d
 means nothing is spoken; cnverc never translates its own voice; from across a table you can
 tell whose turn it is; turn-based, continuous and paired mode behave as before.
 
-**M8 — Streaming ASR.** `StreamAsr` against `OnlineRecognizer` with a streaming model. `Partial`
+**M8 - Streaming ASR.** `StreamAsr` against `OnlineRecognizer` with a streaming model. `Partial`
 messages flowing to the caption pane. Commit policy: hold a prefix until it is unchanged across N
 successive updates before passing it downstream (LocalAgreement).
 *Check:* captions appear while the speaker is still talking; measured end-to-end latency is
 materially below the M2 segment path on the same utterances.
 
-**M9 — Portability acceptance.** Produce the release folder. Zip it.
+**M9 - Portability acceptance.** Produce the release folder. Zip it.
 *Check:* on a machine with no internet, no Rust, no Node, and no prior installation, unzip and
 run. Everything works, paired mode included, over a direct cable to a second such machine.
 **This is the acceptance test for the project.** If it fails, the project has failed regardless
@@ -614,7 +614,7 @@ of the state of M0–M8.
 
 - Do not add a model download button, a "get models" helper, or a first-run wizard that fetches
   anything.
-- Do not add Ollama, an OpenAI-compatible client, or any HTTP client — including to localhost.
+- Do not add Ollama, an OpenAI-compatible client, or any HTTP client - including to localhost.
 - Do not add STUN, TURN, a relay, a rendezvous server, a hosted signalling service, or any peer
   discovery that depends on a name resolving through a public DNS resolver.
 - Do not stream audio between peers, and do not build a client/server split where one machine
@@ -631,7 +631,7 @@ of the state of M0–M8.
 
 ---
 
-## Appendix A — Physical transports for paired mode
+## Appendix A - Physical transports for paired mode
 
 All of these present to the OS as an IP interface. **The socket code is identical across every
 one of them** and must not special-case any transport.
@@ -653,7 +653,7 @@ one of them** and must not special-case any transport.
 A dumb switch or a direct cable means no DHCP server, so Windows falls back to link-local
 addressing (169.254.x.x) after roughly thirty seconds of negotiation. It works, but the addresses
 are ugly and may change between sessions. For a repeatedly-used rig, set static IPs on that
-interface once — 192.168.50.1 and 192.168.50.2 — and never think about it again.
+interface once - 192.168.50.1 and 192.168.50.2 - and never think about it again.
 
 The pairing panel must **list every local interface with its current IP address**, so the user can
 read one off laptop A and type it into laptop B without hunting through `ipconfig`.

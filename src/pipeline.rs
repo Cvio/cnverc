@@ -6,15 +6,15 @@
 //!
 //! Threads, per SPEC §11:
 //!
-//! * capture — the cpal callback, in `audio.rs`; never blocks.
-//! * pipeline — owns the VAD and the recognizer. Models load here too, so a
+//! * capture - the cpal callback, in `audio.rs`; never blocks.
+//! * pipeline - owns the VAD and the recognizer. Models load here too, so a
 //!   front end stays responsive while they do.
-//! * translate — translation, so a slow token stream cannot stall
+//! * translate - translation, so a slow token stream cannot stall
 //!   recognition.
-//! * speaker — synthesis for whatever is to be spoken, a local translation or
+//! * speaker - synthesis for whatever is to be spoken, a local translation or
 //!   an utterance from the other PC in paired mode.
-//! * playback — the output stream and the half-duplex gate, in `playback.rs`.
-//! * peer — paired mode, when it is on (SPEC §9), in `peer.rs`.
+//! * playback - the output stream and the half-duplex gate, in `playback.rs`.
+//! * peer - paired mode, when it is on (SPEC §9), in `peer.rs`.
 
 use std::collections::HashMap;
 use std::net::SocketAddr;
@@ -802,7 +802,7 @@ fn run(root: &Path, config: &Config, options: &Options, wiring: RunWiring) -> Re
         if let Some(peak) = log_level.take_if_due() {
             match peak {
                 None => warn!(
-                    "input level: digital silence over the last {} s — is the microphone muted?",
+                    "input level: digital silence over the last {} s - is the microphone muted?",
                     LEVEL_LOG.as_secs()
                 ),
                 Some(dbfs) => info!(

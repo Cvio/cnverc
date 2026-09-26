@@ -12,7 +12,7 @@ Read this whole file before writing any code.
 
 Example: an English speaker sits on the left, a Spanish speaker on the right.
 
-1. The left person presses **Left Arrow**. The left side of the window lights up: "Listening —
+1. The left person presses **Left Arrow**. The left side of the window lights up: "Listening -
    English".
 2. They speak, then press **Left Arrow** again to finish.
 3. cnverc transcribes the speech as English, translates it into Spanish, and speaks the Spanish
@@ -56,7 +56,7 @@ turn-based mode. It is not hold-to-talk.
 **3. One person at a time.** While one side is recording, the other key does nothing. While
 the machine is speaking a translation, both keys do nothing, and the microphone is off. That
 stops cnverc from hearing its own output and translating it. Show the reason on screen
-("Speaking — wait") so a key press that does nothing doesn't look like a bug.
+("Speaking - wait") so a key press that does nothing doesn't look like a bug.
 
 **4. Escape cancels.** Escape throws away a recording in progress, or stops playback early.
 Nothing is translated or spoken for a cancelled turn.
@@ -115,8 +115,8 @@ are the arrows.
 Two columns, left and right, matching where the people sit.
 
 Each column shows:
-- The language and the key, in large text: "English — ←".
-- A status: Ready / Listening / Working / Speaking — wait.
+- The language and the key, in large text: "English - ←".
+- A status: Ready / Listening / Working / Speaking - wait.
 - A running history of that side's turns: what was said, and the translation.
 
 The column whose turn it is gets a strong, obvious highlight. Someone glancing at the screen
@@ -131,33 +131,33 @@ progress.
 
 Do these in order. Commit after each one.
 
-**Step 1 — config and mode switch.** Add the `[shared]` section and the Shared mode option.
+**Step 1 - config and mode switch.** Add the `[shared]` section and the Shared mode option.
 Nothing happens yet when it's selected.
 Check: the app starts with an old `cnverc.toml` that has no `[shared]` section, and with a new
 one. `cnverc --report` still runs.
 
-**Step 2 — direction logic, no GUI.** Write the function that takes "which side pressed" and
+**Step 2 - direction logic, no GUI.** Write the function that takes "which side pressed" and
 returns source language, target language and voice. Write unit tests for it: left→right,
 right→left, a missing voice, and a recognizer that doesn't cover one of the languages.
 Check: `cargo test` passes.
 
-**Step 3 — keys and turn states.** Handle the two keys and Escape, with the one-at-a-time
+**Step 3 - keys and turn states.** Handle the two keys and Escape, with the one-at-a-time
 rules from decision 3. Log each state change.
 Check, by hand: press Left, press Right during the left turn (nothing happens), press Left to
 end. Press Escape during a turn (nothing is spoken).
 
-**Step 4 — run the pipeline per turn.** Send each finished turn through the recognizer,
+**Step 4 - run the pipeline per turn.** Send each finished turn through the recognizer,
 translator and voice, using the direction from step 2.
 Check, by hand: speak English on the left, hear Spanish. Speak Spanish on the right, hear
 English. Neither ever comes out in the wrong language.
 
-**Step 5 — the two-column window.** Build the layout above.
+**Step 5 - the two-column window.** Build the layout above.
 Check: from across a table, you can tell whose turn it is.
 
-**Step 6 — re-test the other modes.** Run turn-based, continuous and paired mode once each.
+**Step 6 - re-test the other modes.** Run turn-based, continuous and paired mode once each.
 Check: all three behave as before.
 
-**Step 7 — documents.** Update `README.md` with how to use Shared mode, and `HANDOFF.md` with
+**Step 7 - documents.** Update `README.md` with how to use Shared mode, and `HANDOFF.md` with
 what was built and anything left open. Add it to `SPEC.md` as its own milestone. Don't renumber
 the existing ones: M8 and M9 are already planned.
 

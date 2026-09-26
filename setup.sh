@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# setup.sh — build cnverc and get it ready to run.
+# setup.sh - build cnverc and get it ready to run.
 #
 # Run it from the cnverc folder, on a PC with internet:
 #

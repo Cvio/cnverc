@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# build-sherpa-linux.sh — build the speech library cnverc needs on Linux. Once.
+# build-sherpa-linux.sh - build the speech library cnverc needs on Linux. Once.
 #
 #   ./build-sherpa-linux.sh
 #

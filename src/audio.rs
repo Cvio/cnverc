@@ -8,7 +8,7 @@
 //!
 //! * The cpal callback runs on the audio device's own realtime thread. It
 //!   downmixes to mono and hands the samples off. It never resamples, never
-//!   locks, and never blocks — if the channel is full it drops the chunk and
+//!   locks, and never blocks - if the channel is full it drops the chunk and
 //!   counts it, because stalling the audio callback is worse than losing 10 ms.
 //! * The capture thread owns the cpal stream (streams are `!Send`) and the
 //!   resampler, and forwards finished 16 kHz chunks downstream.

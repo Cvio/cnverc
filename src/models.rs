@@ -3,16 +3,16 @@
 //! `cnverc` enumerates the subdirectories of `models/asr/` and `models/tts/`,
 //! parses the `engine.toml` in each, and reports what it found. Adding a model
 //! means dropping a folder in and restarting. There is no registry, no
-//! database, no cache, and no download UI — and every file on disk keeps the
+//! database, no cache, and no download UI - and every file on disk keeps the
 //! name it was published with.
 //!
 //! Three outcomes per directory, and the difference between them matters:
 //!
-//! * **Skipped** — no `engine.toml`. Warned about by directory name.
-//! * **Failed** — `engine.toml` is present but wrong (unknown backend, missing
+//! * **Skipped** - no `engine.toml`. Warned about by directory name.
+//! * **Failed** - `engine.toml` is present but wrong (unknown backend, missing
 //!   required file role, malformed TOML). A hard error *for that entry*, never
 //!   a panic, and listed so the user can see why.
-//! * **Loaded** — usable, unless a declared file is absent from disk, in which
+//! * **Loaded** - usable, unless a declared file is absent from disk, in which
 //!   case the entry is listed but **disabled** with the missing filename shown.
 //!   The user's most likely question is "why isn't my model in the list", and
 //!   the answer has to be on screen.
@@ -169,7 +169,7 @@ pub struct Engine {
     /// `engine.toml`. Piper voices need `espeak-ng-data/` for pronunciation,
     /// and a directory cannot be declared under `[files]`.
     pub data_dir: Option<ModelDir>,
-    /// Directory name — the identity used in `cnverc.toml` (SPEC §7).
+    /// Directory name - the identity used in `cnverc.toml` (SPEC §7).
     pub dir_name: String,
     pub dir: PathBuf,
     /// Human-readable name from `engine.toml`.

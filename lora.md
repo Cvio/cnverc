@@ -4,8 +4,8 @@ As of 2026-09-21.
 
 ## Bottom line
 
-One pipeline trains both models — a LoRA on Whisper large-v3-turbo for recognition and a LoRA on
-Qwen3 1.7B for translation — and every dialect-specific choice lives in a single **dialect
+One pipeline trains both models - a LoRA on Whisper large-v3-turbo for recognition and a LoRA on
+Qwen3 1.7B for translation - and every dialect-specific choice lives in a single **dialect
 profile** file. Starting with Mexican Spanish means writing `es-MX.yaml`. Moving to Iraqi Arabic
 means writing `ar-IQ.yaml` and running the same seven steps.
 
@@ -66,7 +66,7 @@ cnverc:
 ```
 
 The **normalizer** matters more than it looks. Word error rate compares words, so both the
-model's output and the reference are cleaned the same way first — lowercase, punctuation removed,
+model's output and the reference are cleaned the same way first - lowercase, punctuation removed,
 numbers written out. For Spanish that is simple. For Arabic it is most of the work; see the
 swapping section.
 
@@ -105,7 +105,7 @@ no-internet rule, which is about the app at runtime.
 ## Step 1: prepare the data
 
 Load every dataset in the profile, map its columns, resample to 16 kHz mono, and drop clips longer
-than `max_seconds` — CIEMPIESS has clips up to 57 seconds, and Whisper only sees 30. Then restore
+than `max_seconds` - CIEMPIESS has clips up to 57 seconds, and Whisper only sees 30. Then restore
 capitalization and punctuation to the transcripts (see Decisions, below), once, and save the
 result so every later step uses the same text.
 
@@ -131,7 +131,7 @@ chrF compares translations character by character; it is steadier than BLEU on s
 and on languages with rich word endings, which covers both Spanish and Arabic.
 
 **The gate** compares the two Whisper numbers. If the dialect error rate is close to the general
-one, the dialect is not what's hurting recognition — skip Step 3 and put the effort into
+one, the dialect is not what's hurting recognition - skip Step 3 and put the effort into
 translation. A dialect rate well above the general one is the case for tuning. Using the gap
 rather than a fixed threshold is what keeps the gate meaningful across languages, since Arabic's
 general error rate starts far higher than Spanish's.
@@ -144,7 +144,7 @@ skip it.
 
 ## Step 3: the recognition LoRA
 
-Tune `openai/whisper-large-v3-turbo` with LoRA in full precision — the 5090 has room, so no 8-bit
+Tune `openai/whisper-large-v3-turbo` with LoRA in full precision - the 5090 has room, so no 8-bit
 loading. Starting settings, to adjust only if the check fails:
 
 | Setting | Start at | Why |
@@ -162,7 +162,7 @@ lowest validation error rather than the last one.
 On 18 hours of audio this is a few hours on the 5090.
 
 **Check:** two numbers against the Step 2 baselines. The dialect error rate on the test set must
-drop. The FLEURS error rate must **not rise by more than about one point** — if it does, the
+drop. The FLEURS error rate must **not rise by more than about one point** - if it does, the
 adapter has traded general Spanish for radio Spanish. Lower the learning rate or the epochs and
 run again before going further.
 
@@ -177,12 +177,12 @@ translations. This is distillation.
 
 1. Take the transcripts named by `mt.source`, drop anything under `min_words`, and remove
    duplicates.
-2. Have the teacher translate each into English. Run it locally on the 5090 — the largest model
-   that fits — so the data never leaves the machine.
+2. Have the teacher translate each into English. Run it locally on the 5090 - the largest model
+   that fits - so the data never leaves the machine.
 3. **Dialect → English pairs:** transcript as the source, the teacher's English as the target.
 4. **English → dialect pairs:** the same pairs reversed, so the target is real dialect written by
-   real speakers. Clean that side first — have the teacher remove false starts and repeated words
-   (*y y*, *que que*) while keeping every dialect word — or Qwen learns to stammer.
+   real speakers. Clean that side first - have the teacher remove false starts and repeated words
+   (*y y*, *que que*) while keeping every dialect word - or Qwen learns to stammer.
 5. Build the **translation test set** from the test speakers' transcripts only, the same way, so
    no sentence in it was trained on.
 
@@ -218,12 +218,12 @@ what got learned.
 Hugging Face checkpoint to OpenAI's original format; run sherpa-onnx's
 `scripts/whisper/export-onnx.py`, adapted to take a local checkpoint and with `dynamo=False` on
 PyTorch 2.9 or later; quantize to int8. Put the encoder, decoder and tokens file in
-`models/asr/<asr_folder>/` with an `engine.toml` — `backend = "whisper"`, `languages` from the
+`models/asr/<asr_folder>/` with an `engine.toml` - `backend = "whisper"`, `languages` from the
 profile. It appears in the recognizer picker beside the stock Whisper, which stays installed.
 
 **Translation**: merge the adapter into Qwen; convert with llama.cpp's `convert_hf_to_gguf.py`;
 quantize to Q4_K_M. `models/mt/` holds exactly one `.gguf`, so move the stock file somewhere safe
-rather than deleting it — comparing the two means swapping them by hand.
+rather than deleting it - comparing the two means swapping them by hand.
 
 **Check:** `cnverc --report` shows the new recognizer as `ok` and finds the new `.gguf`.
 
@@ -239,7 +239,7 @@ cnverc runs int8 and Q4, and compression can quietly take a gain back.
 - **Live:** a real conversation. Numbers can improve while the experience doesn't.
 
 **Check:** the tuned models still beat stock inside cnverc, on both the dialect and the regression
-sets. If a gain survives training but not export, the compression is eating it — try Q5_K_M or
+sets. If a gain survives training but not export, the compression is eating it - try Q5_K_M or
 Q8_0 for Qwen before retraining anything. Record the final numbers in `results.md`: that line is
 the result of the whole run.
 
@@ -249,7 +249,7 @@ The seven steps stay the same. What changes is the profile, and for Arabic, thre
 profile can't solve on its own.
 
 ```yaml
-# profiles/ar-IQ.yaml — the parts that differ
+# profiles/ar-IQ.yaml - the parts that differ
 id: ar-IQ
 name: Iraqi Arabic
 whisper_language: ar
@@ -262,10 +262,10 @@ mt:
 ```
 
 **1. The data doesn't exist openly.** This is the real blocker, not the pipeline. The substantial
-Iraqi speech sets are paid — Appen's 50-hour conversational corpus, the TRANSTAC data — and are
+Iraqi speech sets are paid - Appen's 50-hour conversational corpus, the TRANSTAC data - and are
 8 kHz telephone audio. The options are to buy one, find Iraqi speech inside a multi-dialect set
 with dialect labels, or record and transcribe your own. The translation side is better off:
-FLORES+ has **Mesopotamian Arabic**, `acm_Arab`, which is Iraqi — about 2,000 professionally
+FLORES+ has **Mesopotamian Arabic**, `acm_Arab`, which is Iraqi - about 2,000 professionally
 translated sentences. It is news and travel register, not street speech, so it makes a good
 regression and test set and a thin training set.
 
@@ -288,7 +288,7 @@ far above FLEURS, which is the case for doing Step 3 at all.
 - **Restore capitalization and punctuation before training.** CIEMPIESS transcripts are lowercase
   with no punctuation. Trained on them as-is, Whisper would stop punctuating, and cnverc's
   captions would lose it. Having the teacher restore case and punctuation once, in Step 1, changes
-  no words — colloquial spellings like *pus* and *namás* stay — and the scores are unaffected
+  no words - colloquial spellings like *pus* and *namás* stay - and the scores are unaffected
   because the normalizer strips both anyway. The fallback, if the teacher punctuates badly, is to
   train as-is and accept unpunctuated captions.
 - **Train the translator on the reference transcripts,** not on what the recognizer produced.
@@ -307,5 +307,5 @@ far above FLEURS, which is the case for doing Step 3 at all.
 - **Whether `ciempiess_test` shares speakers with `ciempiess_light`.** Step 1 answers it; if they
   overlap, the published test set can't be used as-is.
 - **Whether Step 3 runs at all.** The Step 2 gate decides, and for Mexican Spanish the honest
-  expectation is a small recognition gain — much of it from the radio-conversation style rather
+  expectation is a small recognition gain - much of it from the radio-conversation style rather
   than the accent.

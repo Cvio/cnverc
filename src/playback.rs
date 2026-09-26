@@ -39,10 +39,20 @@ const TAIL: Duration = Duration::from_millis(150);
 /// How often the player thread checks whether the queue has drained.
 const POLL: Duration = Duration::from_millis(10);
 
-/// Ceiling on queued audio, in samples at the device rate. Roughly 30 seconds
-/// at 48 kHz: an utterance is a second or two, so hitting this means something
-/// is wrong and dropping is better than growing without bound.
-const MAX_QUEUED: usize = 48_000 * 30;
+/// Ceiling on queued speech, in seconds. A turn is split at pauses past 25 s,
+/// and its translation spoken can run longer than the original (a 15 s English
+/// turn came out as 22 s of Arabic), so this leaves room for a long turn plus
+/// a reply behind it. Past it something is wrong, and dropping is better than
+/// growing without bound.
+const MAX_QUEUED_SECONDS: usize = 60;
+
+/// [`MAX_QUEUED_SECONDS`] in queue entries. The queue holds interleaved
+/// samples, one per channel per frame, so the channel count is part of the
+/// limit: counted in plain samples, an 8-channel HDMI output held under 4 s
+/// of speech and dropped every long reply.
+fn max_queued(device_rate: u32, channels: usize) -> usize {
+    device_rate as usize * channels * MAX_QUEUED_SECONDS
+}
 
 /// Whether the microphone should be ignored right now.
 ///
@@ -227,19 +237,26 @@ impl Player {
             resampler.resample(samples, true)
         };
 
-        // A reply that arrives during the user's turn waits, and must not
-        // close the gate on the turn's audio. It closes the gate when it plays.
-        if !self.hold.load(Ordering::Acquire) {
-            self.gate.speaking_started();
-        }
-
         let mut queue = self
             .queue
             .lock()
             .map_err(|_| anyhow!("the playback queue is poisoned"))?;
-        if queue.samples.len() + resampled.len() * self.channels > MAX_QUEUED {
-            warn!("playback queue is full; dropping an utterance");
+        if queue.samples.len() + resampled.len() * self.channels
+            > max_queued(self.device_rate, self.channels)
+        {
+            warn!(
+                "playback queue is full ({MAX_QUEUED_SECONDS} s); dropping an utterance of {} ms",
+                resampled.len() as u64 * 1000 / u64::from(self.device_rate)
+            );
             return Ok(());
+        }
+
+        // A reply that arrives during the user's turn waits, and must not
+        // close the gate on the turn's audio. It closes the gate when it plays.
+        // Only once the audio is certainly queued: closing it for audio that
+        // was then dropped left the microphone shut with nothing playing.
+        if !self.hold.load(Ordering::Acquire) {
+            self.gate.speaking_started();
         }
         // The device wants interleaved frames; the same mono sample goes to
         // every channel.
@@ -478,6 +495,16 @@ mod tests {
     use super::*;
 
     #[test]
+    fn the_queue_limit_is_seconds_of_speech_whatever_the_channel_count() {
+        for channels in [1, 2, 6, 8] {
+            let limit = max_queued(48_000, channels);
+            // A 30 s reply fits on every output, HDMI's eight channels included.
+            assert!(48_000 * 30 * channels <= limit, "{channels} ch");
+            assert_eq!(limit / channels / 48_000, MAX_QUEUED_SECONDS);
+        }
+    }
+
+    #[test]
     fn the_gate_is_closed_while_speaking_and_through_the_tail() {
         let gate = Gate::new(true);
         assert!(!gate.is_closed(), "idle");
@@ -507,7 +534,7 @@ mod tests {
     /// A virtual audio cable makes the feedback path of SPEC §10 exact and
     /// silent: playback goes into the cable's input, capture comes out of its
     /// output, so cnverc hears its own voice at full level with no speakers
-    /// involved. The test runs twice — with the gate off, to prove the loop is
+    /// involved. The test runs twice - with the gate off, to prove the loop is
     /// real and the recognizer would hear itself, and with the gate on, which
     /// must produce nothing at all.
     ///

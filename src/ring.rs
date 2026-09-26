@@ -66,7 +66,7 @@ impl UtteranceRing {
         utterance
     }
 
-    /// Most recent first — the order a "re-run that" control would offer.
+    /// Most recent first - the order a "re-run that" control would offer.
     /// Nothing outside the tests reads it back yet; the UI does from
     /// Milestone 5.
     #[cfg(test)]

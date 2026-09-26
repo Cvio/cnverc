@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# setup-models.sh — download every model cnverc needs.
+# setup-models.sh - download every model cnverc needs.
 #
 # Run it once, from the cnverc folder, on a PC with internet:
 #
@@ -31,7 +31,7 @@ failed=0
 say()  { printf '\n=== %s\n' "$1"; }
 warn() { printf '!!! %s\n' "$1" >&2; failed=1; }
 
-# fetch <url> <output path>   — skips a file that is already there
+# fetch <url> <output path>   - skips a file that is already there
 fetch() {
   if [ -s "$2" ]; then
     printf '    already have %s\n' "$2"
@@ -58,10 +58,10 @@ fi
 
 mkdir -p "$MODELS/vad" "$MODELS/mt" "$MODELS/tts" "$DL"
 
-say "Voice detector (2 MB) — notices when someone starts and stops talking"
+say "Voice detector (2 MB) - notices when someone starts and stops talking"
 fetch "$BASE_ASR/silero_vad.onnx" "$MODELS/vad/silero_vad.onnx"
 
-say "Translator (1.1 GB) — Qwen3 1.7B"
+say "Translator (1.1 GB) - Qwen3 1.7B"
 fetch "$BASE_MT/Qwen3-1.7B-Q4_K_M.gguf" "$MODELS/mt/qwen3-1.7b-q4_k_m.gguf"
 
 say "Speech recognizer: Whisper (564 MB)"
@@ -101,7 +101,7 @@ else
   unpack "$DL/voice-es.tar.bz2" "$MODELS/tts"
 fi
 
-say "Mexican Spanish voice (67 MB) — a second Spanish voice, higher quality"
+say "Mexican Spanish voice (67 MB) - a second Spanish voice, higher quality"
 if [ -d "$MODELS/tts/vits-piper-es_MX-claude-high" ] &&
    [ -s "$MODELS/tts/vits-piper-es_MX-claude-high/es_MX-claude-high.onnx" ]; then
   printf '    already have the Mexican Spanish voice\n'

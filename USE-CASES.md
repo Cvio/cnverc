@@ -17,7 +17,7 @@ conversation goes, what good looks like, what usually goes wrong, and its limits
 | Reading, not listening | Any, with speech off | 1 or 2 | [6](#6-captions-only) |
 | No internet anywhere | Any | 1 or 2 | [7](#7-working-with-no-internet) |
 | Checking or fixing recognition | `--compare`, `--wav` | 1 | [8](#8-which-recognizer-hears-me-best-and-why-was-that-wrong) |
-| Using a better or tuned model | — | 1 | [9](#9-adding-a-better-model) |
+| Using a better or tuned model | - | 1 | [9](#9-adding-a-better-model) |
 
 A few things are true in every case:
 

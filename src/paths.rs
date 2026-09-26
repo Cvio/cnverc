@@ -41,12 +41,12 @@ fn strip_verbatim(path: &Path) -> PathBuf {
     }
 }
 
-/// `<root>/cnverc.toml` — user selections (SPEC §7).
+/// `<root>/cnverc.toml` - user selections (SPEC §7).
 pub fn config_file(root: &Path) -> PathBuf {
     root.join("cnverc.toml")
 }
 
-/// `<root>/models` — the model tree (SPEC §5).
+/// `<root>/models` - the model tree (SPEC §5).
 pub fn models_dir(root: &Path) -> PathBuf {
     root.join("models")
 }
@@ -56,22 +56,22 @@ pub fn vad_model_file(root: &Path) -> PathBuf {
     models_dir(root).join("vad").join("silero_vad.onnx")
 }
 
-/// `<root>/models/asr` — one subdirectory per ASR engine.
+/// `<root>/models/asr` - one subdirectory per ASR engine.
 pub fn asr_dir(root: &Path) -> PathBuf {
     models_dir(root).join("asr")
 }
 
-/// `<root>/models/tts` — one subdirectory per TTS voice.
+/// `<root>/models/tts` - one subdirectory per TTS voice.
 pub fn tts_dir(root: &Path) -> PathBuf {
     models_dir(root).join("tts")
 }
 
-/// `<root>/models/mt` — translation GGUF files.
+/// `<root>/models/mt` - translation GGUF files.
 pub fn mt_dir(root: &Path) -> PathBuf {
     models_dir(root).join("mt")
 }
 
-/// `<root>/logs` — rolling log files, alongside stdout.
+/// `<root>/logs` - rolling log files, alongside stdout.
 pub fn logs_dir(root: &Path) -> PathBuf {
     root.join("logs")
 }

@@ -1,4 +1,4 @@
-//! `cnverc.toml` — user selections only, by directory name (SPEC §7).
+//! `cnverc.toml` - user selections only, by directory name (SPEC §7).
 //!
 //! The file holds exactly the keys §7 lists and nothing else. Models are
 //! referenced by the name of their directory under `models/`; no paths, no
@@ -192,8 +192,8 @@ impl Default for Peer {
 }
 
 impl Config {
-    /// Read `cnverc.toml`. A missing file is not an error — the defaults in
-    /// §7 apply — but the absolute path that was tried is reported so the user
+    /// Read `cnverc.toml`. A missing file is not an error - the defaults in
+    /// §7 apply - but the absolute path that was tried is reported so the user
     /// knows where to create it. A malformed file *is* an error: silently
     /// falling back to defaults would hide the user's selections.
     pub fn load(path: &Path) -> Result<(Self, bool)> {

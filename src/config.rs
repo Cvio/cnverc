@@ -30,6 +30,8 @@ pub struct Config {
     pub tts: Tts,
     #[serde(default)]
     pub peer: Peer,
+    #[serde(default)]
+    pub shared: Shared,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -51,6 +53,8 @@ pub struct Languages {
 pub enum ModeKind {
     Continuous,
     Turn,
+    /// Two people, one machine, a key each (M7.5).
+    Shared,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -104,6 +108,37 @@ pub struct Peer {
     pub display_name: String,
     /// mDNS/broadcast convenience; manual entry always available.
     pub discovery: bool,
+}
+
+/// Shared-machine mode (M7.5): two people, one machine, a key each. The key
+/// says who is talking and so which language they speak.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct Shared {
+    pub left_language: String,
+    pub right_language: String,
+    /// The voice that speaks what the LEFT person said, so a voice in the
+    /// RIGHT person's language. A folder name under models/tts/; empty means
+    /// the first installed voice for that language.
+    pub left_voice: String,
+    /// The voice that speaks what the RIGHT person said, in the LEFT person's
+    /// language.
+    pub right_voice: String,
+    pub left_key: String,
+    pub right_key: String,
+}
+
+impl Default for Shared {
+    fn default() -> Self {
+        Self {
+            left_language: "en".to_string(),
+            right_language: "es".to_string(),
+            left_voice: String::new(),
+            right_voice: String::new(),
+            left_key: "ArrowLeft".to_string(),
+            right_key: "ArrowRight".to_string(),
+        }
+    }
 }
 
 impl Default for Languages {
@@ -228,6 +263,7 @@ impl Config {
             match self.mode.kind {
                 ModeKind::Continuous => "continuous",
                 ModeKind::Turn => "turn",
+                ModeKind::Shared => "shared",
             },
         );
         set(
@@ -243,9 +279,62 @@ impl Config {
         set(&mut doc, "tts", "half_duplex", self.tts.half_duplex);
         set(&mut doc, "peer", "enabled", self.peer.enabled);
         set(&mut doc, "peer", "peer_addr", self.peer.peer_addr.as_str());
+        set(
+            &mut doc,
+            "shared",
+            "left_language",
+            self.shared.left_language.as_str(),
+        );
+        set(
+            &mut doc,
+            "shared",
+            "right_language",
+            self.shared.right_language.as_str(),
+        );
+        set_explained(
+            &mut doc,
+            "shared",
+            "left_voice",
+            self.shared.left_voice.as_str(),
+            VOICE_NOTE_LEFT,
+        );
+        set_explained(
+            &mut doc,
+            "shared",
+            "right_voice",
+            self.shared.right_voice.as_str(),
+            VOICE_NOTE_RIGHT,
+        );
 
         std::fs::write(path, doc.to_string())
             .with_context(|| format!("failed to write {}", path.display()))
+    }
+}
+
+/// The comments written above the voice keys when cnverc adds them, because
+/// which voice each key means is easy to get backwards.
+const VOICE_NOTE_LEFT: &str = "# left_voice speaks what the LEFT person said, so it is a voice in the RIGHT
+                               # person's language. A folder name under models/tts/; empty = first match.
+";
+const VOICE_NOTE_RIGHT: &str =
+    "# right_voice speaks what the RIGHT person said, in the LEFT person's language.
+";
+
+/// Like [`set`], but a key being added for the first time gets `note` as a
+/// comment above it.
+fn set_explained(
+    doc: &mut toml_edit::DocumentMut,
+    table: &str,
+    key: &str,
+    value: &str,
+    note: &str,
+) {
+    let existed = doc.get(table).and_then(|t| t.get(key)).is_some();
+    set(doc, table, key, value);
+    if !existed {
+        if let Some(mut entry) = doc[table].as_table_mut().and_then(|t| t.key_mut(key)) {
+            entry.leaf_decor_mut().set_prefix(note);
+        }
     }
 }
 
@@ -393,6 +482,62 @@ discovery = true
         assert_eq!(config.vad.min_silence_ms, 500);
         assert_eq!(config.mode.kind, ModeKind::Continuous);
         assert_eq!(config.mode.turn_key, "Space");
+    }
+
+    #[test]
+    fn a_file_from_before_shared_mode_still_loads() {
+        // The M7 template exactly as it shipped: no [shared] section.
+        let config: Config = toml::from_str(SPEC_EXAMPLE).expect("the M7 file must load");
+        assert_eq!(config.shared, Shared::default());
+        assert_eq!(config.shared.left_key, "ArrowLeft");
+    }
+
+    #[test]
+    fn a_shared_section_loads_and_shared_is_a_mode() {
+        let config: Config = toml::from_str(
+            "[mode]\nkind = \"shared\"\n\n[shared]\nleft_language = \"es\"\n\
+             right_language = \"en\"\nleft_voice = \"vits-piper-en_US-lessac-medium\"\n",
+        )
+        .expect("a [shared] section must load");
+        assert_eq!(config.mode.kind, ModeKind::Shared);
+        assert_eq!(config.shared.left_language, "es");
+        assert_eq!(config.shared.left_voice, "vits-piper-en_US-lessac-medium");
+        assert_eq!(
+            config.shared.right_voice, "",
+            "a key left out takes its default"
+        );
+        assert!(toml::from_str::<Config>("[shared]\nmiddle_key = \"x\"\n").is_err());
+    }
+
+    #[test]
+    fn saving_adds_the_shared_section_with_the_voice_keys_explained() {
+        let path = std::env::temp_dir().join(format!("cnverc-shared-{}.toml", std::process::id()));
+        std::fs::write(&path, "[asr]\nengine = \"whisper\"\n").expect("write");
+
+        let (mut config, _) = Config::load(&path).expect("load");
+        config.mode.kind = ModeKind::Shared;
+        config.shared.right_voice = "vits-piper-en_US-lessac-medium".to_string();
+        config.save_selections(&path).expect("save");
+        // A second save must not stack the comments up.
+        config.save_selections(&path).expect("save again");
+
+        let saved = std::fs::read_to_string(&path).expect("read back");
+        let _ = std::fs::remove_file(&path);
+        assert!(saved.contains("[shared]"), "{saved}");
+        assert!(saved.contains("kind = \"shared\""), "{saved}");
+        assert_eq!(
+            saved
+                .matches("left_voice speaks what the LEFT person said")
+                .count(),
+            1,
+            "{saved}"
+        );
+        let reloaded: Config = toml::from_str(&saved).expect("the saved file must parse");
+        assert_eq!(
+            reloaded.shared.right_voice,
+            "vits-piper-en_US-lessac-medium"
+        );
+        assert_eq!(reloaded.mode.kind, ModeKind::Shared);
     }
 
     #[test]

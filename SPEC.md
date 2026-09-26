@@ -262,6 +262,14 @@ listen_addr = "0.0.0.0:47800"
 peer_addr = ""           # e.g. "192.168.50.2:47800"
 display_name = ""        # empty = hostname
 discovery = true         # mDNS/broadcast convenience; manual entry always available
+
+[shared]                 # M7.5: two people, one machine, a key each
+left_language  = "en"
+right_language = "es"
+left_voice     = ""      # speaks what the LEFT person said: a voice in the RIGHT
+right_voice    = ""      # person's language; folder under models/tts/, "" = first
+left_key       = "ArrowLeft"
+right_key      = "ArrowRight"
 ```
 
 Do not add configuration keys beyond what a milestone actually requires.
@@ -558,6 +566,23 @@ the continuous-mode headset warning. Discovery last, and only after manual entry
 *Check:* two laptops on an isolated switch with no internet hold a turn-based Spanish/English
 conversation; unplugging the WAN uplink changes nothing; pulling the cable mid-session
 force-releases the floor and shows a disconnected state on both ends.
+
+**M7.5 — Shared-machine mode.** Added after M7 and built before M8; the numbering of M8 and
+M9 is unchanged. Two people who speak different languages use **one** machine, each with a
+key (the arrows by default, `[shared]` above). The key says who is talking and so which
+language they speak: that language goes to the recognizer explicitly, and nothing is detected,
+so Shared mode requires Whisper (Parakeet decides the language itself). One person at a time:
+while one side records, the other key does nothing, and while a translation is worked on or
+spoken, neither does, and the microphone is closed. Escape cancels a turn, or what it is
+producing, and nothing from it is spoken. Each side has its own language and its own voice,
+chosen by folder name. The window shows a column per person with an unmistakable highlight on
+the active one. Shared mode and paired mode exclude each other. Specified in full in
+`shared-machine-mode.md`.
+*Check:* by hand, with speakers at normal volume: English spoken on the left is heard in
+Spanish, Spanish on the right in English, never in the wrong language, and the log records the
+language used for every turn; the other key does nothing during a turn; Escape during a turn
+means nothing is spoken; cnverc never translates its own voice; from across a table you can
+tell whose turn it is; turn-based, continuous and paired mode behave as before.
 
 **M8 — Streaming ASR.** `StreamAsr` against `OnlineRecognizer` with a streaming model. `Partial`
 messages flowing to the caption pane. Commit policy: hold a prefix until it is unchanged across N

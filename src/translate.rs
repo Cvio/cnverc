@@ -251,7 +251,10 @@ pub fn language_name(code: &str) -> &str {
         "fr" => "French",
         "it" => "Italian",
         "pt" => "Portuguese",
-        other => other,
+        "ar" => "Arabic",
+        "ru" => "Russian",
+        _other => "-",
+        // other => other,
     }
 }
 

@@ -1,4 +1,4 @@
-﻿name = "Piper es_MX claude (high)"
+name = "Piper es_MX claude (high)"
 kind = "segment"
 backend = "vits"
 languages = ["es"]

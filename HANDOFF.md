@@ -2,8 +2,10 @@
 
 Written 2026-09-19 at the end of a long Windows session, for a new session starting on the
 user's Linux PC. Read this first, then `CLAUDE.md` (the hard constraints and the working
-rules), then `SPEC.md` (the build specification). `README.md` is the user's setup guide, and
-`TECHNICAL.md` covers design and internals.
+rules), then `SPEC.md` (the build specification). `README.md` is the user's setup guide
+(built around `check-setup.sh`, `setup.sh` and, on Linux, `build-sherpa-linux.sh`),
+`USE-CASES.md` covers situations and workflows, `ARCHITECTURE.md` is the map of the code for a
+developer, and `TECHNICAL.md` covers design decisions and build internals.
 
 ## 1. What cnverc is
 
@@ -28,6 +30,9 @@ as they are.
   killed link force-releasing the floor with a clear message on both ends. It was run over
   Wi-Fi, disabling the adapter rather than pulling a cable; the detection is the same either
   way, since both are silent failures caught only by missed pings.
+- **M7.5 (shared-machine mode) is built** on the `shared-machine-mode` branch: two people,
+  one machine, a key each. Its check is by hand and hasn't been run yet; see section 8. How it
+  works is in `TECHNICAL.md`, "Shared-machine mode".
 - **Linux runs**, including the window. The Start crash is fixed with a Linux-only shared
   sherpa-onnx build; see section 5.
 - M8 (streaming ASR) and M9 (portability acceptance) haven't started.
@@ -178,7 +183,16 @@ is on.
 
 ## 8. Next steps
 
-1. Wait for the go-ahead on M8 (streaming ASR). Don't start it unasked.
+1. Run M7.5's check by hand (`SPEC.md`, M7.5): both directions heard in the right language with
+   speakers up, the other key dead during a turn, Escape cancelling, and turn-based,
+   continuous and paired mode re-tested. The log's `transcribing as "<lang>"` lines must match
+   the keys pressed. Then merge the branch and mark M7.5 complete in `CLAUDE.md`.
+2. Wait for the go-ahead on M8 (streaming ASR). Don't start it unasked.
+
+Open from M7.5, not blocking: Shared mode keeps two copies of the Whisper model in memory,
+one per language, because the in-place language change sherpa-onnx has isn't bound by its Rust
+crates. The voice-picker issue below is unchanged; Shared mode works around it by choosing
+voices by folder name.
 
 Nothing is outstanding from M0–M7. The `[en]`-captioned Spanish clip in section 5 is **not** a
 bug and needs no work: cnverc doesn't detect language, the clip simply didn't match the

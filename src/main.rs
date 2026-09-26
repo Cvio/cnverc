@@ -20,6 +20,7 @@ mod pipeline;
 mod playback;
 mod report;
 mod ring;
+mod shared;
 mod translate;
 mod tts;
 mod vad;

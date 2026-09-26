@@ -283,6 +283,15 @@ impl PlaybackControl {
         self.gate.open_now();
     }
 
+    /// Stop speaking now and forget anything still queued (Escape, in
+    /// shared-machine mode). The player notices the queue is empty, reports
+    /// SpeakingEnded, and the gate reopens after its usual tail.
+    pub fn stop(&self) {
+        if let Ok(mut queue) = self.queue.lock() {
+            queue.samples.clear();
+        }
+    }
+
     /// The turn is over: play anything that arrived during it.
     pub fn end_turn(&self) {
         let waiting = self

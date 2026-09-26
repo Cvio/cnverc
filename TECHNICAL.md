@@ -8,7 +8,8 @@ is [SPEC.md](SPEC.md); the constraints every change must respect are restated in
 
 ## Status
 
-Milestones 0–7 of 9 are complete. Milestones are defined in `SPEC.md` §13 and built in order;
+Milestones 0–7 of 9 are complete, and M7.5 (shared-machine mode) is built and waiting for
+its check by hand. Milestones are defined in `SPEC.md` §13 and built in order;
 each one's check must pass before the next starts.
 
 Windows is the primary platform. Linux builds and runs the full pipeline too, using a shared
@@ -24,34 +25,12 @@ sherpa-onnx build; see "Linux: shared sherpa-onnx" under Building.
 | M5 | The egui window; the pipeline reports only through `PipelineMsg` |
 | M6 | Continuous and turn-based modes, switchable while running; the turn key in toggle and hold styles |
 | M7 | Paired mode: listener, dialler, `Hello`, `Utterance`, the floor token, the peer panel, the firewall diagnostic, the headset warning, discovery |
+| M7.5 | Shared-machine mode: two people, one machine, a key each; per-turn languages through recognition, translation and speech (check pending) |
 
 ## Architecture
 
-```
-mic ─► capture ─► VAD ─► ASR ─► translate ─┬─► speak ─► playback ─► speakers
-       (cpal)   (Silero)  │     (llama.cpp) │   (Piper)   (cpal)
-                          │                 └─► peer ◄──► the other PC (text only)
-                          └──────► PipelineMsg ──────► window / terminal
-```
-
-Threads, connected by bounded channels:
-
-- **Capture** runs the cpal input callback. It resamples to 16 kHz mono once, at the capture
-  boundary. Nothing downstream resamples again.
-- **Pipeline** (`pipeline.rs`) runs the VAD and ASR, and takes `PipelineCmd`s (mode changes,
-  turn start and end).
-- **Translate** runs MT, so a slow token stream can't stall recognition. It hands each
-  translation to the speaker (solo) or to the peer (paired).
-- **Speak** runs TTS for everything this PC says: its own translations when solo, and the
-  other PC's utterances when paired. The voice is chosen per utterance by its language.
-- **Playback** runs the cpal output and the half-duplex `Gate`.
-- **Peer** (`peer.rs`), only when paired, owns the connection, the handshake and the floor.
-  It has helpers: an acceptor, one dialler per Connect, and a reader per connection. A stalled
-  or dead peer can't block capture, recognition or the window.
-
-The front ends, `gui.rs` (the window) and `listen.rs` (`--listen`), receive `PipelineMsg`
-only. What those messages do to the window lives in `gui::Session`, which contains no egui
-and is unit-tested directly.
+How the modules fit together, the threads and messages, and a turn traced end to end are in
+[ARCHITECTURE.md](ARCHITECTURE.md). What follows here are the design decisions behind them.
 
 Details worth knowing:
 
@@ -70,7 +49,9 @@ Details worth knowing:
   received utterance's own `lang`, never inferred.
 - **Recognition and translation each use 6 threads.**
 - The window renders with **DirectX 12** on Windows. The Vulkan backend logged loader errors
-  at startup.
+  at startup. It uses **FXC**, the shader compiler built into Windows: wgpu's default takes any
+  `dxcompiler.dll` on PATH first, and Wireshark's old copy made the window fail with "Parent
+  device is lost". With FXC, no DLL has to sit beside `cnverc.exe`.
 
 ## What the translation stage refuses
 
@@ -340,6 +321,44 @@ run it through `sherpa-onnx-offline` with the recognizer's files.
 
 Logs are written to `logs/` next to the exe. `--listen --wav` also writes each utterance to
 `logs/segments/`, which is how a misheard sentence gets diagnosed.
+
+## Shared-machine mode (M7.5)
+
+Two people, one machine, a key each (`shared-machine-mode.md`). What the code does:
+
+- **The direction rule** is `shared::direction`, pure and tested. Given which side pressed, it
+  returns the language to recognise (that side's), the language to translate into (the other
+  side's), and the voice's folder, or the reason there can be no turn. It refuses a recognizer
+  that isn't Whisper: Parakeet v3 is multilingual but detects the language itself and ignores
+  the one it's given, so it can't honour "the key sets the language".
+- **The language travels with the turn.** `PipelineCmd::BeginSharedTurn(Direction)` opens the
+  microphone; the direction rides on the `Turn`, then `ToTranslate`, then `SpeakJob`, so the
+  recognizer, translator and speaker take the language and voice from the job, not the run.
+  Every utterance logs `transcribing as "<lang>"`: if the language were lost, Whisper would
+  guess, be right most of the time, and hide the bug. Told a Spanish clip was English, Whisper
+  quietly produces an English translation rather than failing.
+- **Whisper keeps a recognizer per language.** Its language is fixed when its recognizer is
+  built, and building one loads the model, which takes seconds. `WhisperAsr` used to rebuild on
+  every change of language; now it keeps one per language used, and Shared mode builds both at
+  startup (`SegmentAsr::prepare`), at the cost of a second copy of the model in memory (about
+  1 GB for turbo int8). sherpa-onnx 1.13.8 can change the language in place
+  (`SherpaOnnxOfflineRecognizerSetConfig`), but no Rust crate binds it, and its Whisper decoder
+  ignores the per-stream `"language"` option. If a later sherpa-onnx crate binds that call,
+  the second copy can go.
+- **One at a time** is `gui::Session::shared_press`, egui-free and tested: the same key ends its
+  turn, the other key is ignored during a turn, and both are ignored while the turn is worked
+  on or spoken. The microphone is closed between turns, as in turn mode.
+- **Escape** sends `PipelineCmd::Cancel`: a turn being recorded is discarded, a generation
+  counter moves on so queued translation and speech jobs from before it are dropped, and
+  `PlaybackControl::stop` empties the playback queue, after which the player reports the end
+  of speech as usual.
+- **Keys** are taken from the frame's input before any widget runs, as the Space key is, but
+  only while no text box has focus (`text_edit_focused`; `egui_wants_keyboard_input` is true for
+  any focused widget and would have disabled the arrows after any click). Escape is taken only
+  when there's something to cancel. Keys are written as words on screen: egui's built-in font
+  has no arrow glyphs.
+- **Voices** are chosen by folder name per side, which sidesteps the filed voice-picker issue
+  (two `es` voices, no tiebreak in `for_language`) without fixing it.
 
 ## Paired mode
 

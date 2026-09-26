@@ -22,6 +22,7 @@
 //! the window's state lives in [`Session`], which has no egui in it and is
 //! tested on its own.
 
+use std::collections::HashMap;
 use std::net::IpAddr;
 use std::path::PathBuf;
 use std::sync::mpsc::{channel, Receiver, Sender};
@@ -39,8 +40,10 @@ use crate::models::{self, AsrBackend, Backend, Engine, Entry, Role};
 use crate::paths;
 use crate::peer::{self, PeerState};
 use crate::pipeline::{self, Options, Pipeline, PipelineCmd, PipelineMsg};
+use crate::shared::{self, Side};
 use crate::translate::language_name;
 use crate::tts;
+use tracing::info;
 
 /// How often the window wakes to read messages while the pipeline runs.
 const REFRESH: Duration = Duration::from_millis(100);
@@ -66,9 +69,103 @@ pub fn run(root: PathBuf, config: Config) -> Result<()> {
     eframe::run_native(
         "cnverc",
         options,
-        Box::new(move |_cc| Ok(Box::new(App::new(root, config)))),
+        Box::new(move |cc| {
+            install_rtl_font(&cc.egui_ctx);
+            Ok(Box::new(App::new(root, config)))
+        }),
     )
     .map_err(|e| anyhow!("the window could not be opened: {e}"))
+}
+
+/// The font family speech in right-to-left scripts (Arabic, Hebrew, Persian,
+/// Urdu) is drawn in. See [`speech`].
+const RTL_FAMILY: &str = "rtl";
+
+/// Fonts with Arabic and Hebrew letters, tried in order. egui's built-in fonts
+/// have neither, and drew an Arabic translation as a row of boxes. cnverc
+/// ships no fonts and downloads nothing, so it borrows one the system has:
+/// Segoe UI or Arial on Windows, Noto Sans Arabic or DejaVu Sans on Linux.
+fn rtl_font_candidates() -> Vec<PathBuf> {
+    let mut candidates = Vec::new();
+    if let Some(windir) = std::env::var_os("WINDIR") {
+        let fonts = PathBuf::from(windir).join("Fonts");
+        candidates.push(fonts.join("segoeui.ttf"));
+        candidates.push(fonts.join("arial.ttf"));
+    }
+    for path in [
+        "/usr/share/fonts/truetype/noto/NotoSansArabic-Regular.ttf",
+        "/usr/share/fonts/noto/NotoSansArabic-Regular.ttf",
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+        "/usr/share/fonts/TTF/DejaVuSans.ttf",
+    ] {
+        candidates.push(PathBuf::from(path));
+    }
+    candidates
+}
+
+/// Makes the [`RTL_FAMILY`] font family, and adds its font as a fallback to
+/// the ordinary one so a stray Arabic word anywhere else is not boxes either.
+///
+/// Why a family of its own rather than only a fallback: egui shapes text in
+/// runs of one font, and the built-in font has the spaces. With the Arabic font
+/// only as a fallback, every word of a sentence becomes its own run, each word
+/// comes out right to left but the words themselves go left to right, so the
+/// sentence reads backwards. In a family whose first font has the Arabic
+/// letters and the spaces and punctuation, the whole line is one run, and the
+/// shaper lays it out right to left.
+fn install_rtl_font(ctx: &egui::Context) {
+    let mut fonts = egui::FontDefinitions::default();
+    let proportional = fonts
+        .families
+        .get(&egui::FontFamily::Proportional)
+        .cloned()
+        .unwrap_or_default();
+    let found = rtl_font_candidates()
+        .into_iter()
+        .find_map(|path| std::fs::read(&path).ok().map(|bytes| (path, bytes)));
+    let mut rtl = proportional.clone();
+    match found {
+        Some((path, bytes)) => {
+            info!("right-to-left text uses {}", path.display());
+            let name = "rtl-system-font".to_string();
+            fonts.font_data.insert(
+                name.clone(),
+                std::sync::Arc::new(egui::FontData::from_owned(bytes)),
+            );
+            rtl.insert(0, name.clone());
+            if let Some(list) = fonts.families.get_mut(&egui::FontFamily::Proportional) {
+                list.push(name);
+            }
+        }
+        None => {
+            // The family must exist either way: egui panics on an unknown one.
+            info!("no font with Arabic letters found; Arabic text will show as boxes");
+        }
+    }
+    fonts
+        .families
+        .insert(egui::FontFamily::Name(RTL_FAMILY.into()), rtl);
+    ctx.set_fonts(fonts);
+}
+
+/// Whether text contains letters of a right-to-left script: Hebrew, Arabic
+/// (with Syriac, Thaana and the rest of that range) and their presentation
+/// forms.
+fn has_rtl(text: &str) -> bool {
+    text.chars()
+        .any(|c| matches!(c as u32, 0x0590..=0x08FF | 0xFB1D..=0xFDFF | 0xFE70..=0xFEFF))
+}
+
+/// Words someone said or a translation of them, in whatever language. Text
+/// with right-to-left letters is drawn in [`RTL_FAMILY`], so it is shaped and
+/// laid out right to left.
+fn speech(text: &str) -> RichText {
+    let rich = RichText::new(text);
+    if has_rtl(text) {
+        rich.family(egui::FontFamily::Name(RTL_FAMILY.into()))
+    } else {
+        rich
+    }
 }
 
 /// Which graphics API draws the window.
@@ -86,6 +183,18 @@ fn graphics_setup() -> eframe::egui_wgpu::WgpuSetupCreateNew {
     #[cfg(windows)]
     {
         setup.instance_descriptor.backends = eframe::wgpu::Backends::DX12;
+        // FXC, the shader compiler built into every Windows. wgpu's default
+        // takes any dxcompiler.dll it finds on PATH first: on one PC that was
+        // Wireshark's old copy, which cannot compile wgpu's shaders, and the
+        // window failed with "Parent device is lost". Choosing FXC makes the
+        // window independent of whatever else is installed, and needs no DLL
+        // beside cnverc.exe (SPEC §2.6). egui's few shaders compile quickly
+        // either way.
+        setup
+            .instance_descriptor
+            .backend_options
+            .dx12
+            .shader_compiler = eframe::wgpu::Dx12Compiler::Fxc;
     }
     setup
 }
@@ -137,6 +246,8 @@ pub struct Caption {
     pub first_audio_ms: Option<u128>,
     /// Paired: the PC it was sent to.
     pub sent_to: Option<String>,
+    /// Shared machine: whose words these were.
+    pub side: Option<Side>,
 }
 
 /// A line in the caption pane.
@@ -187,6 +298,9 @@ pub struct Session {
     pub floor_note: Option<String>,
     /// Other cnverc PCs heard on the network.
     pub discovered: Vec<Found>,
+    /// Shared machine: whose turn is being recorded, worked on or spoken.
+    /// Cleared when the turn is fully over.
+    pub active_side: Option<Side>,
 }
 
 impl Default for Session {
@@ -207,6 +321,7 @@ impl Default for Session {
             floor: None,
             floor_note: None,
             discovered: Vec::new(),
+            active_side: None,
         }
     }
 }
@@ -233,6 +348,7 @@ impl Session {
         self.floor = None;
         self.floor_note = None;
         self.discovered.clear();
+        self.active_side = None;
         self.mode = None;
         self.turn = TurnState::Idle;
         self.state = RunState::Starting("models".to_string());
@@ -256,9 +372,15 @@ impl Session {
                 self.mode = Some(mode);
                 self.turn = TurnState::Idle;
             }
-            PipelineMsg::TurnStarted => {
+            PipelineMsg::TurnStarted { side } => {
                 self.turn = TurnState::Recording;
                 self.floor_note = None;
+                self.active_side = side;
+            }
+            PipelineMsg::TurnCancelled => {
+                self.turn = TurnState::Idle;
+                self.active_side = None;
+                self.level_db = None;
             }
             PipelineMsg::TurnEnded => {
                 self.turn = TurnState::Processing;
@@ -275,26 +397,30 @@ impl Session {
             PipelineMsg::Final {
                 index,
                 text,
+                lang,
                 speech_ms,
                 asr_ms,
                 ..
             } => self.push(Line::Caption(Caption {
                 index,
-                source_lang: self.languages.0.clone(),
+                source_lang: lang,
+                // Until the translation says what it is in.
                 target_lang: self.languages.1.clone(),
                 source: text,
                 speech_ms,
                 asr_ms,
+                side: self.active_side,
                 ..Default::default()
             })),
             PipelineMsg::Translated {
                 index,
                 target,
+                lang,
                 translate_ms,
-                ..
             } => {
                 if let Some(caption) = self.caption_mut(index) {
                     caption.target = Some(target);
+                    caption.target_lang = lang;
                     caption.translate_ms = Some(translate_ms);
                 }
             }
@@ -379,12 +505,42 @@ impl Session {
                 self.peer = None;
                 self.floor = None;
                 self.discovered.clear();
+                self.active_side = None;
             }
         }
 
         if finishes_turn && self.turn == TurnState::Processing {
             self.turn = TurnState::Idle;
+            self.active_side = None;
         }
+    }
+
+    /// Shared machine: what a press of one side's key should do (decision 3 of
+    /// shared-machine-mode.md). One person at a time: while one side records,
+    /// the other key does nothing; while anything is being worked on or
+    /// spoken, neither does.
+    pub fn shared_press(&self, side: Side) -> SharedPress {
+        if self.state != RunState::Listening || self.mode != Some(ModeKind::Shared) {
+            return SharedPress::Ignore("not listening yet".to_string());
+        }
+        match self.turn {
+            TurnState::Recording if self.active_side == Some(side) => SharedPress::End,
+            TurnState::Recording => {
+                SharedPress::Ignore(format!("the {} person is talking", side.other()))
+            }
+            TurnState::Processing if self.speaking => {
+                SharedPress::Ignore("speaking — wait".to_string())
+            }
+            TurnState::Processing => SharedPress::Ignore("working — wait".to_string()),
+            TurnState::Waiting => SharedPress::Ignore("waiting".to_string()),
+            TurnState::Idle if self.speaking => SharedPress::Ignore("speaking — wait".to_string()),
+            TurnState::Idle => SharedPress::Begin,
+        }
+    }
+
+    /// Shared machine: whether Escape has anything to cancel.
+    pub fn shared_can_cancel(&self) -> bool {
+        self.mode == Some(ModeKind::Shared) && (self.turn != TurnState::Idle || self.speaking)
     }
 
     /// The most recent caption with every stage it went through, for the
@@ -410,6 +566,18 @@ impl Session {
             _ => None,
         })
     }
+}
+
+/// What a shared-machine key press does.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SharedPress {
+    /// Start this side's turn.
+    Begin,
+    /// End this side's turn.
+    End,
+    /// Nothing, and why: shown in the column so a dead key isn't mistaken
+    /// for a bug.
+    Ignore(String),
 }
 
 /// What the turn key did this frame.
@@ -514,6 +682,12 @@ struct App {
     turn_key: egui::Key,
     /// Whether that key is down.
     turn_key_state: TurnKey,
+    /// Shared machine: each side's key and its state, and Escape's.
+    shared_keys: [(Side, egui::Key, TurnKey); 2],
+    escape_state: TurnKey,
+    /// Shared machine: something a side's column must show, such as why its
+    /// key did nothing or that its chosen voice is missing.
+    shared_notes: HashMap<Side, String>,
     /// In hold style, whether the key is down. Tracked here rather than read
     /// from the turn state, so a tap shorter than the pipeline's reply still
     /// ends the turn it began.
@@ -541,6 +715,12 @@ impl App {
             notice: None,
             turn_key: egui::Key::Space,
             turn_key_state: TurnKey::default(),
+            shared_keys: [
+                (Side::Left, egui::Key::ArrowLeft, TurnKey::default()),
+                (Side::Right, egui::Key::ArrowRight, TurnKey::default()),
+            ],
+            escape_state: TurnKey::default(),
+            shared_notes: HashMap::new(),
             holding: false,
             peer_input: config.peer.peer_addr.clone(),
             addresses: Vec::new(),
@@ -548,6 +728,20 @@ impl App {
             root,
             config,
         };
+        // The shared-machine keys can be changed because some keyboards and
+        // foot pedals send other keys; the arrows are the default.
+        for (side, key, _) in &mut app.shared_keys {
+            let name = side.key(&app.config.shared).to_string();
+            match egui::Key::from_name(&name) {
+                Some(named) => *key = named,
+                None => {
+                    app.notice = Some(format!(
+                        "[shared].{side}_key = \"{name}\" is not a key cnverc knows; using {}",
+                        key.name()
+                    ))
+                }
+            }
+        }
         match egui::Key::from_name(&app.config.mode.turn_key) {
             Some(key) => app.turn_key = key,
             None => {
@@ -610,6 +804,55 @@ impl App {
         }
     }
 
+    /// Shared machine: turn the two keys and Escape into turns.
+    fn handle_shared_keys(&mut self, pressed: &[(Side, bool)], escape: bool) {
+        let Some(pipeline) = &self.pipeline else {
+            return;
+        };
+        if escape && self.session.shared_can_cancel() {
+            info!("shared machine: Escape; cancelling");
+            pipeline.send(PipelineCmd::Cancel);
+            return;
+        }
+        for &(side, down) in pressed {
+            if !down {
+                continue;
+            }
+            match self.session.shared_press(side) {
+                SharedPress::End => {
+                    info!("shared machine: {side} key; ending the {side} turn");
+                    pipeline.send(PipelineCmd::EndTurn);
+                }
+                SharedPress::Ignore(why) => {
+                    info!("shared machine: {side} key ignored: {why}");
+                }
+                SharedPress::Begin => {
+                    let recognizer = self.selected_recognizer();
+                    match shared::direction(side, &self.config.shared, recognizer, &self.voices) {
+                        Ok(resolved) => {
+                            match resolved.warning {
+                                Some(warning) => {
+                                    self.shared_notes.insert(side, warning);
+                                }
+                                None => {
+                                    self.shared_notes.remove(&side);
+                                }
+                            }
+                            info!("shared machine: {side} key; starting the {side} turn");
+                            pipeline.send(PipelineCmd::BeginSharedTurn(resolved.direction));
+                        }
+                        Err(why) => {
+                            info!("shared machine: {side} key refused: {why}");
+                            self.shared_notes.insert(side, why);
+                        }
+                    }
+                }
+            }
+            // One press per frame is plenty; a second would only be ignored.
+            break;
+        }
+    }
+
     /// Turn the key's presses and releases into turns.
     fn handle_turn_key(&mut self, edges: KeyEdges, window_focused: bool) {
         let Some(pipeline) = &self.pipeline else {
@@ -661,6 +904,23 @@ impl App {
             ModeKind::Continuous,
             "Listen continuously",
         );
+        // Shared mode is one machine for two people; paired mode is two
+        // machines. They cannot both be on (shared-machine-mode.md, decision 1).
+        let paired = self.config.peer.enabled;
+        ui.add_enabled_ui(!paired, |ui| {
+            ui.radio_value(
+                &mut self.config.mode.kind,
+                ModeKind::Shared,
+                "Shared machine (two people, a key each)",
+            )
+            .on_disabled_hover_text(
+                "Not while paired: untick \"Pair with another PC\" first. Shared mode is two \
+                 people at one machine.",
+            );
+        });
+        if paired {
+            ui.weak("Shared machine is off while pairing is ticked.");
+        }
         if self.config.mode.kind == ModeKind::Turn {
             ui.indent("turn style", |ui| {
                 ui.radio_value(
@@ -693,7 +953,8 @@ impl App {
     /// found, and the state of the connection. Usable while running: pairing
     /// happens after Start.
     fn peer_panel(&mut self, ui: &mut egui::Ui) {
-        let editable = !self.running();
+        let shared = self.config.mode.kind == ModeKind::Shared;
+        let editable = !self.running() && !shared;
         let toggled = ui
             .add_enabled(
                 editable,
@@ -703,6 +964,11 @@ impl App {
                 "Two PCs, one conversation. Each translates what its own person says and \
                  sends only the text; the other PC shows it and speaks it.",
             )
+            .on_disabled_hover_text(if shared {
+                "Not in Shared machine mode: choose another mode first."
+            } else {
+                "Stop to change this."
+            })
             .changed();
         if toggled {
             self.save();
@@ -1005,7 +1271,12 @@ impl App {
         ui.add_enabled_ui(editable, |ui| {
             changed |= self.recognizer_picker(ui);
             ui.add_space(8.0);
-            changed |= self.language_pickers(ui);
+            if self.config.mode.kind == ModeKind::Shared {
+                ui.label("Languages");
+                ui.weak("Set for each side, above the two columns.");
+            } else {
+                changed |= self.language_pickers(ui);
+            }
             ui.add_space(8.0);
             changed |= self.device_pickers(ui);
             ui.add_space(8.0);
@@ -1208,6 +1479,10 @@ impl App {
                 )
                 .changed();
 
+            if self.config.mode.kind == ModeKind::Shared {
+                ui.weak("Voices are chosen for each side, above the two columns.");
+                return;
+            }
             match tts::for_language(&self.voices, &self.config.languages.target) {
                 Ok(voice) => {
                     ui.weak(format!("Voice: {}", voice.name));
@@ -1340,6 +1615,230 @@ impl App {
         }
     }
 
+    /// Shared machine: the per-side settings above, and a column per person,
+    /// placed where they sit. Whose turn it is must be obvious from a metre
+    /// away, so the active column is filled with a strong colour, and says in
+    /// large type what it is doing.
+    fn shared_view(&mut self, ui: &mut egui::Ui) {
+        let busy = self.session.turn != TurnState::Idle || self.session.speaking;
+        let mut changed = false;
+        ui.add_enabled_ui(!busy, |ui| {
+            ui.columns(2, |cols| {
+                for (col, side) in cols.iter_mut().zip([Side::Left, Side::Right]) {
+                    changed |= self.shared_settings(col, side);
+                }
+            });
+        });
+        if busy {
+            ui.weak("Settings are locked until this turn is over.");
+        }
+        if changed {
+            self.save();
+        }
+        ui.add_space(6.0);
+
+        ui.columns(2, |cols| {
+            for (col, side) in cols.iter_mut().zip([Side::Left, Side::Right]) {
+                self.shared_column(col, side);
+            }
+        });
+    }
+
+    /// One side's language and voice. The voice list holds only voices in
+    /// the OTHER side's language: it is the voice this side's words are
+    /// spoken in.
+    fn shared_settings(&mut self, ui: &mut egui::Ui, side: Side) -> bool {
+        let languages = self.known_languages();
+        let voices: Vec<(String, String)> =
+            shared::voices_for(side.other().language(&self.config.shared), &self.voices)
+                .into_iter()
+                .map(|v| (v.dir_name.clone(), v.name.clone()))
+                .collect();
+        let mut changed = false;
+        let title = match side {
+            Side::Left => "Left person",
+            Side::Right => "Right person",
+        };
+        ui.label(RichText::new(title).strong());
+
+        let (language, voice) = match side {
+            Side::Left => (
+                &mut self.config.shared.left_language,
+                &mut self.config.shared.left_voice,
+            ),
+            Side::Right => (
+                &mut self.config.shared.right_language,
+                &mut self.config.shared.right_voice,
+            ),
+        };
+        egui::ComboBox::from_id_salt(("shared language", side.to_string()))
+            .width(ui.available_width())
+            .selected_text(format!("Speaks {}", describe_language(language)))
+            .show_ui(ui, |ui| {
+                for code in &languages {
+                    changed |= ui
+                        .selectable_value(language, code.clone(), describe_language(code))
+                        .changed();
+                }
+            });
+
+        let shown = voices
+            .iter()
+            .find(|(folder, _)| folder == voice)
+            .map(|(_, name)| format!("Spoken as: {name}"))
+            .unwrap_or_else(|| {
+                if voice.is_empty() {
+                    "Spoken as: the first installed voice".to_string()
+                } else {
+                    format!("Spoken as: {voice} (not installed)")
+                }
+            });
+        egui::ComboBox::from_id_salt(("shared voice", side.to_string()))
+            .width(ui.available_width())
+            .selected_text(shown)
+            .show_ui(ui, |ui| {
+                changed |= ui
+                    .selectable_value(voice, String::new(), "The first installed voice")
+                    .changed();
+                for (folder, name) in &voices {
+                    changed |= ui
+                        .selectable_value(voice, folder.clone(), format!("{name} ({folder})"))
+                        .changed();
+                }
+            })
+            .response
+            .on_hover_text(
+                "The voice this person's words are spoken in, so a voice in the other \
+                 person's language.",
+            );
+        changed
+    }
+
+    /// One person's column: their language and key in large type, what is
+    /// happening, and what they have said so far.
+    fn shared_column(&self, ui: &mut egui::Ui, side: Side) {
+        const IDLE: Color32 = Color32::from_rgb(52, 58, 70);
+        const RED: Color32 = Color32::from_rgb(196, 40, 40);
+        const AMBER: Color32 = Color32::from_rgb(190, 125, 20);
+        const BLUE: Color32 = Color32::from_rgb(40, 100, 170);
+        const GREEN: Color32 = Color32::from_rgb(38, 130, 70);
+
+        let s = &self.session;
+        let key = self
+            .shared_keys
+            .iter()
+            .find(|(k, _, _)| *k == side)
+            .map(|(_, key, _)| key_symbol(*key))
+            .unwrap_or_default();
+        let language = side.language(&self.config.shared);
+        let mine = s.active_side == Some(side);
+        let running = s.state == RunState::Listening && s.mode == Some(ModeKind::Shared);
+
+        let (status, fill) = if !running {
+            (
+                match &s.state {
+                    RunState::Starting(_) => "Loading…".to_string(),
+                    _ => "Press Start".to_string(),
+                },
+                IDLE,
+            )
+        } else if mine {
+            match s.turn {
+                TurnState::Recording => (format!("● Listening — press {key} to finish"), RED),
+                _ if s.speaking => ("Speaking".to_string(), BLUE),
+                _ => ("Working…".to_string(), AMBER),
+            }
+        } else if s.speaking {
+            ("Speaking — wait".to_string(), IDLE)
+        } else if s.turn != TurnState::Idle {
+            ("Wait — the other person has the turn".to_string(), IDLE)
+        } else {
+            (format!("Ready — press {key}"), GREEN)
+        };
+
+        // Why this side can't take a turn, worked out now so it shows before
+        // anyone presses the key.
+        let refusal = shared::direction(
+            side,
+            &self.config.shared,
+            self.selected_recognizer(),
+            &self.voices,
+        )
+        .err();
+
+        egui::Frame::new()
+            .fill(if mine { fill } else { IDLE })
+            .stroke(egui::Stroke::new(
+                if mine { 4.0 } else { 1.0 },
+                if mine {
+                    Color32::WHITE
+                } else {
+                    Color32::from_gray(90)
+                },
+            ))
+            .corner_radius(10)
+            .inner_margin(14)
+            .show(ui, |ui| {
+                ui.set_width(ui.available_width());
+                ui.label(
+                    RichText::new(format!("{} — {key}", language_name(language)))
+                        .size(34.0)
+                        .strong()
+                        .color(Color32::WHITE),
+                );
+                let status_colour = if mine || fill == GREEN {
+                    Color32::WHITE
+                } else {
+                    Color32::from_gray(200)
+                };
+                let status_text = RichText::new(status).size(22.0).color(status_colour);
+                if !mine && fill == GREEN {
+                    egui::Frame::new()
+                        .fill(GREEN)
+                        .corner_radius(6)
+                        .inner_margin(6)
+                        .show(ui, |ui| {
+                            ui.label(status_text);
+                        });
+                } else {
+                    ui.label(status_text);
+                }
+                for problem in [refusal.as_ref(), self.shared_notes.get(&side)]
+                    .into_iter()
+                    .flatten()
+                {
+                    ui.label(
+                        RichText::new(problem)
+                            .color(Color32::from_rgb(255, 200, 120))
+                            .size(15.0),
+                    );
+                }
+            });
+        ui.add_space(6.0);
+
+        egui::ScrollArea::vertical()
+            .id_salt(("shared history", side.to_string()))
+            .auto_shrink([false, false])
+            .stick_to_bottom(true)
+            .show(ui, |ui| {
+                let mine: Vec<&Caption> = s
+                    .lines
+                    .iter()
+                    .filter_map(|line| match line {
+                        Line::Caption(c) if c.side == Some(side) => Some(c),
+                        _ => None,
+                    })
+                    .collect();
+                if mine.is_empty() {
+                    ui.weak("What this person says, and its translation, appears here.");
+                }
+                for c in mine {
+                    shared_card(ui, c);
+                    ui.add_space(6.0);
+                }
+            });
+    }
+
     fn captions(&self, ui: &mut egui::Ui) {
         // Continuous and paired together: both microphones and both speakers
         // are live, with no floor between them. Said for as long as it is
@@ -1431,12 +1930,51 @@ impl eframe::App for App {
         // take it as a click (SPEC §8). It is consumed whatever state the
         // window is in, so a press meant as a turn never lands on the focused
         // button instead.
-        let key = self.turn_key;
-        let (raw, focused) = ui
-            .ctx()
-            .input_mut(|input| (take_turn_key(input, key), input.focused));
-        let edges = self.turn_key_state.update(raw, focused);
-        self.handle_turn_key(edges, focused);
+        if self.config.mode.kind == ModeKind::Shared {
+            // Arrow keys also move the cursor in a text box: while one has
+            // focus, the keys are its (decision 7). Escape is taken only when
+            // there is something to cancel, so it still closes a dropdown.
+            let typing = ui.ctx().text_edit_focused();
+            let take_escape = !typing && self.session.shared_can_cancel();
+            let keys: Vec<(Side, egui::Key)> = self
+                .shared_keys
+                .iter()
+                .map(|(side, key, _)| (*side, *key))
+                .collect();
+            let (raws, escape_raw, focused) = ui.ctx().input_mut(|input| {
+                let raws: Vec<KeyEdges> = keys
+                    .iter()
+                    .map(|(_, key)| {
+                        if typing {
+                            KeyEdges::default()
+                        } else {
+                            take_turn_key(input, *key)
+                        }
+                    })
+                    .collect();
+                let escape = if take_escape {
+                    take_turn_key(input, egui::Key::Escape)
+                } else {
+                    KeyEdges::default()
+                };
+                (raws, escape, input.focused)
+            });
+            let pressed: Vec<(Side, bool)> = self
+                .shared_keys
+                .iter_mut()
+                .zip(raws)
+                .map(|((side, _, state), raw)| (*side, state.update(raw, focused).pressed))
+                .collect();
+            let escape = self.escape_state.update(escape_raw, focused).pressed;
+            self.handle_shared_keys(&pressed, escape);
+        } else {
+            let key = self.turn_key;
+            let (raw, focused) = ui
+                .ctx()
+                .input_mut(|input| (take_turn_key(input, key), input.focused));
+            let edges = self.turn_key_state.update(raw, focused);
+            self.handle_turn_key(edges, focused);
+        }
 
         egui::Panel::top("top").show(ui, |ui| {
             ui.add_space(6.0);
@@ -1455,7 +1993,13 @@ impl eframe::App for App {
             .show(ui, |ui| {
                 egui::ScrollArea::vertical().show(ui, |ui| self.settings_panel(ui));
             });
-        egui::CentralPanel::default().show(ui, |ui| self.captions(ui));
+        egui::CentralPanel::default().show(ui, |ui| {
+            if self.config.mode.kind == ModeKind::Shared {
+                self.shared_view(ui);
+            } else {
+                self.captions(ui);
+            }
+        });
     }
 }
 
@@ -1468,6 +2012,49 @@ fn describe_language(code: &str) -> String {
     }
 }
 
+/// A key as a person reads it. In words, not arrow symbols: egui's built-in
+/// font has no arrow glyphs and draws them as boxes.
+fn key_symbol(key: egui::Key) -> String {
+    match key {
+        egui::Key::ArrowLeft => "Left arrow".to_string(),
+        egui::Key::ArrowRight => "Right arrow".to_string(),
+        egui::Key::ArrowUp => "Up arrow".to_string(),
+        egui::Key::ArrowDown => "Down arrow".to_string(),
+        other => other.name().to_string(),
+    }
+}
+
+/// One shared-machine turn in its speaker's column: what they said, then
+/// what the machine said for them.
+fn shared_card(ui: &mut egui::Ui, c: &Caption) {
+    egui::Frame::group(ui.style()).show(ui, |ui| {
+        ui.set_width(ui.available_width());
+        ui.label(speech(&c.source).size(18.0));
+        match (&c.target, &c.problem) {
+            (Some(text), _) => {
+                ui.label(speech(text).size(18.0).strong());
+            }
+            (None, Some(problem)) => {
+                ui.label(
+                    RichText::new(format!("Not translated: {problem}"))
+                        .color(Color32::from_rgb(220, 150, 60)),
+                );
+            }
+            (None, None) => {
+                ui.label(RichText::new("…").size(18.0).weak());
+            }
+        }
+        let mut timing = format!(
+            "{} to {} · {} ms of speech",
+            c.source_lang, c.target_lang, c.speech_ms
+        );
+        if let Some(ms) = c.first_audio_ms {
+            timing.push_str(&format!(" · first audio {ms} ms"));
+        }
+        ui.small(timing);
+    });
+}
+
 /// One utterance: the translation large, the original beneath it, and the
 /// timings small. The translation is what the listener came for.
 fn caption_card(ui: &mut egui::Ui, c: &Caption) {
@@ -1475,7 +2062,7 @@ fn caption_card(ui: &mut egui::Ui, c: &Caption) {
         ui.set_width(ui.available_width());
         match (&c.target, &c.problem) {
             (Some(text), _) => {
-                ui.label(RichText::new(text).size(22.0).strong());
+                ui.label(speech(text).size(22.0).strong());
             }
             (None, Some(problem)) => {
                 ui.label(
@@ -1487,7 +2074,7 @@ fn caption_card(ui: &mut egui::Ui, c: &Caption) {
                 ui.label(RichText::new("…").size(22.0).weak());
             }
         }
-        ui.label(RichText::new(&c.source).size(16.0).italics());
+        ui.label(speech(&c.source).size(16.0).italics());
         let mut timing = format!(
             "#{} · {} to {} · {} ms of speech · recognised {} ms",
             c.index, c.source_lang, c.target_lang, c.speech_ms, c.asr_ms
@@ -1520,8 +2107,8 @@ fn remote_card(
         .fill(Color32::from_rgba_unmultiplied(110, 60, 150, 40))
         .show(ui, |ui| {
             ui.set_width(ui.available_width());
-            ui.label(RichText::new(text).size(22.0).strong());
-            ui.label(RichText::new(source_text).size(16.0).italics());
+            ui.label(speech(text).size(22.0).strong());
+            ui.label(speech(source_text).size(16.0).italics());
             ui.small(format!("{from} · {source_lang} to {lang}"));
         });
 }
@@ -1552,9 +2139,9 @@ fn comparison_card(ui: &mut egui::Ui, c: &Comparison, selected: &str) {
                     ui.monospace(format!("{} ms", run.elapsed_ms));
                     if run.ok {
                         ui.label(if run.text.is_empty() {
-                            "(no text)"
+                            RichText::new("(no text)")
                         } else {
-                            &run.text
+                            speech(&run.text)
                         });
                     } else {
                         ui.colored_label(Color32::from_rgb(220, 90, 70), &run.text);
@@ -1574,9 +2161,19 @@ mod tests {
         PipelineMsg::Final {
             index,
             text: text.to_string(),
+            lang: "es".to_string(),
             speech_ms: 1500,
             asr_ms: 120,
         }
+    }
+
+    #[test]
+    fn right_to_left_text_is_told_apart() {
+        assert!(has_rtl("ساعدني في إدخال مشترياتي."));
+        assert!(has_rtl("שלום"));
+        assert!(has_rtl("Uber إلى المطار"));
+        assert!(!has_rtl("¿Dónde está la estación?"));
+        assert!(!has_rtl("Help me get my groceries in."));
     }
 
     #[test]
@@ -1587,6 +2184,7 @@ mod tests {
         s.apply(PipelineMsg::Translated {
             index: 1,
             target: "Where is the station?".to_string(),
+            lang: "en".to_string(),
             translate_ms: 340,
         });
         s.apply(PipelineMsg::SpeakingStarted {
@@ -1660,11 +2258,21 @@ mod tests {
 
     #[test]
     fn a_caption_keeps_the_languages_it_was_spoken_in() {
+        // Each caption's source language comes from its own message, and the
+        // target from the run until the translation says otherwise, so
+        // changing the settings between runs never relabels old captions.
+        let final_in = |index, text: &str, lang: &str| PipelineMsg::Final {
+            index,
+            text: text.to_string(),
+            lang: lang.to_string(),
+            speech_ms: 1500,
+            asr_ms: 120,
+        };
         let mut s = Session::default();
         s.begin("en", "es", false, true, false);
-        s.apply(final_msg(1, "Hello."));
+        s.apply(final_in(1, "Hello.", "en"));
         s.begin("es", "en", false, true, false);
-        s.apply(final_msg(2, "Hola."));
+        s.apply(final_in(2, "Hola.", "es"));
 
         let Line::Caption(first) = &s.lines[0] else {
             panic!("a caption")
@@ -1831,7 +2439,7 @@ mod tests {
         s.apply(PipelineMsg::Mode(ModeKind::Turn));
         assert_eq!(s.turn, TurnState::Idle);
 
-        s.apply(PipelineMsg::TurnStarted);
+        s.apply(PipelineMsg::TurnStarted { side: None });
         assert_eq!(s.turn, TurnState::Recording);
         s.apply(PipelineMsg::Level(-20.0));
 
@@ -1843,6 +2451,7 @@ mod tests {
         s.apply(PipelineMsg::Translated {
             index: 1,
             target: "Hello.".to_string(),
+            lang: "en".to_string(),
             translate_ms: 300,
         });
         assert_eq!(
@@ -1874,7 +2483,7 @@ mod tests {
             let mut s = Session::default();
             s.begin("es", "en", false, true, false);
             s.apply(PipelineMsg::Mode(ModeKind::Turn));
-            s.apply(PipelineMsg::TurnStarted);
+            s.apply(PipelineMsg::TurnStarted { side: None });
             s.apply(PipelineMsg::TurnEnded);
             s.apply(ending);
             assert_eq!(s.turn, TurnState::Idle);
@@ -1886,12 +2495,13 @@ mod tests {
         let mut s = Session::default();
         s.begin("es", "en", false, false, false);
         s.apply(PipelineMsg::Mode(ModeKind::Turn));
-        s.apply(PipelineMsg::TurnStarted);
+        s.apply(PipelineMsg::TurnStarted { side: None });
         s.apply(PipelineMsg::TurnEnded);
         s.apply(final_msg(1, "Hola."));
         s.apply(PipelineMsg::Translated {
             index: 1,
             target: "Hello.".to_string(),
+            lang: "en".to_string(),
             translate_ms: 300,
         });
         assert_eq!(s.turn, TurnState::Idle);
@@ -1952,13 +2562,14 @@ mod tests {
         assert_eq!(s.turn, TurnState::Waiting, "the microphone is not open yet");
 
         s.apply(PipelineMsg::FloorChanged(Holder::Me));
-        s.apply(PipelineMsg::TurnStarted);
+        s.apply(PipelineMsg::TurnStarted { side: None });
         assert_eq!(s.turn, TurnState::Recording);
         s.apply(PipelineMsg::TurnEnded);
         s.apply(final_msg(1, "¿Dónde está la estación?"));
         s.apply(PipelineMsg::Translated {
             index: 1,
             target: "Where is the station?".to_string(),
+            lang: "en".to_string(),
             translate_ms: 300,
         });
         assert_eq!(s.turn, TurnState::Idle, "nothing to speak here");
@@ -2027,5 +2638,112 @@ mod tests {
         let mut s = Session::default();
         s.begin("es", "en", true, true, true);
         assert!(!s.paired);
+    }
+
+    fn shared_session() -> Session {
+        let mut s = Session::default();
+        s.begin("es", "en", false, true, false);
+        s.apply(PipelineMsg::Listening);
+        s.apply(PipelineMsg::Mode(ModeKind::Shared));
+        s
+    }
+
+    #[test]
+    fn shared_one_person_at_a_time() {
+        let mut s = shared_session();
+        assert_eq!(s.shared_press(Side::Left), SharedPress::Begin);
+        assert_eq!(s.shared_press(Side::Right), SharedPress::Begin);
+
+        s.apply(PipelineMsg::TurnStarted {
+            side: Some(Side::Left),
+        });
+        assert_eq!(s.active_side, Some(Side::Left));
+        assert_eq!(s.shared_press(Side::Left), SharedPress::End);
+        assert!(
+            matches!(s.shared_press(Side::Right), SharedPress::Ignore(why) if why.contains("left")),
+            "the right key does nothing during the left turn"
+        );
+
+        s.apply(PipelineMsg::TurnEnded);
+        assert!(
+            matches!(s.shared_press(Side::Left), SharedPress::Ignore(why) if why.contains("working"))
+        );
+
+        s.apply(final_msg(1, "Hello."));
+        s.apply(PipelineMsg::Translated {
+            index: 1,
+            target: "Hola.".to_string(),
+            lang: "es".to_string(),
+            translate_ms: 200,
+        });
+        s.apply(PipelineMsg::SpeakingStarted {
+            index: Some(1),
+            first_audio_ms: 900,
+        });
+        for side in [Side::Left, Side::Right] {
+            assert!(
+                matches!(s.shared_press(side), SharedPress::Ignore(why) if why.contains("speaking")),
+                "neither key works while the machine speaks"
+            );
+        }
+
+        s.apply(PipelineMsg::SpeakingEnded);
+        assert_eq!(s.turn, TurnState::Idle);
+        assert_eq!(s.active_side, None);
+        assert_eq!(s.shared_press(Side::Right), SharedPress::Begin);
+    }
+
+    #[test]
+    fn shared_captions_belong_to_their_side_and_carry_their_languages() {
+        let mut s = shared_session();
+        s.apply(PipelineMsg::TurnStarted {
+            side: Some(Side::Right),
+        });
+        s.apply(PipelineMsg::TurnEnded);
+        s.apply(PipelineMsg::Final {
+            index: 3,
+            text: "Hola.".to_string(),
+            lang: "es".to_string(),
+            speech_ms: 800,
+            asr_ms: 400,
+        });
+        s.apply(PipelineMsg::Translated {
+            index: 3,
+            target: "Hello.".to_string(),
+            lang: "en".to_string(),
+            translate_ms: 200,
+        });
+        let Line::Caption(c) = &s.lines[0] else {
+            panic!("a caption")
+        };
+        assert_eq!(c.side, Some(Side::Right));
+        assert_eq!(
+            (c.source_lang.as_str(), c.target_lang.as_str()),
+            ("es", "en")
+        );
+    }
+
+    #[test]
+    fn escape_cancels_only_when_there_is_something_to_cancel() {
+        let mut s = shared_session();
+        assert!(!s.shared_can_cancel(), "Escape must still close a dropdown");
+        s.apply(PipelineMsg::TurnStarted {
+            side: Some(Side::Left),
+        });
+        assert!(s.shared_can_cancel());
+        s.apply(PipelineMsg::TurnCancelled);
+        assert_eq!(s.turn, TurnState::Idle);
+        assert_eq!(s.active_side, None);
+        assert!(!s.shared_can_cancel());
+        assert_eq!(s.shared_press(Side::Right), SharedPress::Begin);
+    }
+
+    #[test]
+    fn shared_keys_do_nothing_outside_shared_mode() {
+        let mut s = Session::default();
+        s.apply(PipelineMsg::Listening);
+        s.apply(PipelineMsg::Mode(ModeKind::Turn));
+        assert!(matches!(s.shared_press(Side::Left), SharedPress::Ignore(_)));
+        assert!(!s.shared_can_cancel());
     }
 }

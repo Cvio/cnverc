@@ -20,7 +20,7 @@ use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::ops::Range;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc::{
     channel, sync_channel, Receiver, RecvTimeoutError, Sender, SyncSender, TrySendError,
 };
@@ -42,6 +42,7 @@ use crate::paths;
 use crate::peer::{self, Outgoing, PeerCmd, PeerHandle, PeerState, Wiring};
 use crate::playback::{Gate, PlaybackControl, Player};
 use crate::ring::{Utterance, UtteranceRing, DEFAULT_CAPACITY};
+use crate::shared::{self, Direction, Side};
 use crate::translate::{LlamaTranslator, Translator};
 use crate::tts::{self, Voice};
 use crate::vad::{Segment, Segmenter, VadSettings};
@@ -90,8 +91,12 @@ pub enum PipelineMsg {
     /// Listening continuously, or waiting for turns (SPEC §8). Sent once the
     /// models are loaded, and again whenever the mode changes.
     Mode(ModeKind),
-    /// A turn has begun: the microphone is open.
-    TurnStarted,
+    /// A turn has begun: the microphone is open. In shared-machine mode,
+    /// whose turn it is.
+    TurnStarted { side: Option<Side> },
+    /// Shared-machine mode: the turn, or whatever it was producing, was
+    /// cancelled. Nothing from it will be translated or spoken.
+    TurnCancelled,
     /// The turn has ended: the microphone is closed, and what was said is on
     /// its way through recognition and translation.
     TurnEnded,
@@ -103,6 +108,8 @@ pub enum PipelineMsg {
     Final {
         index: usize,
         text: String,
+        /// The language it was recognised as.
+        lang: String,
         /// Length of the audio. Always travels with `asr_ms`: Whisper pads to
         /// 30 s internally, and a timing without its duration misleads.
         speech_ms: u64,
@@ -112,6 +119,8 @@ pub enum PipelineMsg {
     Translated {
         index: usize,
         target: String,
+        /// The language it was translated into.
+        lang: String,
         translate_ms: u128,
     },
     /// Speech the VAD cut, in which the recognizer found no words. Usually a
@@ -173,7 +182,7 @@ pub struct Options {
 }
 
 /// What a front end can ask of a running pipeline.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PipelineCmd {
     /// Switch between continuous and turn-based listening without a restart
     /// (SPEC §8).
@@ -186,6 +195,12 @@ pub enum PipelineCmd {
     Connect(SocketAddr),
     /// Paired mode: end the pairing.
     Disconnect,
+    /// Shared-machine mode: open the microphone for one side's turn. The
+    /// direction carries the language Whisper is told and where the words go.
+    BeginSharedTurn(Direction),
+    /// Shared-machine mode: throw away the turn in progress, or stop what is
+    /// being worked on or spoken. Nothing from it is translated or spoken.
+    Cancel,
 }
 
 /// Something to say aloud.
@@ -199,6 +214,12 @@ pub struct SpeakJob {
     pub text: String,
     /// When the clock for time-to-first-audio started.
     pub since: Instant,
+    /// The voice's folder under models/tts/, when a particular one was chosen
+    /// (shared-machine mode). Otherwise the first voice for `lang`.
+    pub voice: Option<String>,
+    /// Which cancellable batch this belongs to; a job older than the latest
+    /// cancel is dropped. `None` is never cancelled.
+    pub generation: Option<u64>,
 }
 
 /// A running pipeline. Dropping it stops it.
@@ -290,7 +311,7 @@ impl Pipeline {
             (Some(peer), PipelineCmd::Disconnect) => peer.send(PeerCmd::Disconnect),
             (Some(peer), PipelineCmd::SetMode(mode)) => {
                 peer.send(PeerCmd::SetMode(mode));
-                let _ = self.commands.send(command);
+                let _ = self.commands.send(PipelineCmd::SetMode(mode));
             }
             (None, PipelineCmd::Connect(_) | PipelineCmd::Disconnect) => {}
             (_, command) => {
@@ -367,6 +388,7 @@ fn run(root: &Path, config: &Config, options: &Options, wiring: RunWiring) -> Re
         }
         Recognizers {
             selected: None,
+            selected_engine: None,
             comparison: loaded,
         }
     } else {
@@ -377,6 +399,7 @@ fn run(root: &Path, config: &Config, options: &Options, wiring: RunWiring) -> Re
         }
         Recognizers {
             selected: load_selected(&engines, &selected_name)?,
+            selected_engine: find_selected(&engines, &selected_name).ok().cloned(),
             comparison: Vec::new(),
         }
     };
@@ -389,6 +412,16 @@ fn run(root: &Path, config: &Config, options: &Options, wiring: RunWiring) -> Re
     // thing to ask rather than two.
     let gate = Arc::new(Gate::new(config.tts.half_duplex));
 
+    // Cancelling (Escape, shared-machine mode) moves this on; translation and
+    // speech jobs from before it are dropped.
+    let generation = Arc::new(AtomicU64::new(0));
+
+    // Shared-machine mode alternates two languages turn by turn. Build
+    // Whisper's recognizer for both now, so no turn waits on a model load.
+    if config.mode.kind == ModeKind::Shared {
+        prepare_shared(&mut asr, &config.shared, events);
+    }
+
     // Solo, this PC speaks its own translations. Paired, the other PC speaks
     // them, and this PC speaks what arrives from the other side, which is in
     // this PC's own language (SPEC §9).
@@ -398,27 +431,64 @@ fn run(root: &Path, config: &Config, options: &Options, wiring: RunWiring) -> Re
         rx: speak_rx,
     } = speech;
     let playback = if config.tts.enabled && !options.compare && asr.selected.is_some() {
-        let expected = if paired {
-            &config.languages.source
-        } else {
-            &config.languages.target
-        };
-        let _ = events.send(PipelineMsg::Loading(format!("a voice for \"{expected}\"")));
         let voices = discovered_voices(root);
+        // Loaded voices, by folder name.
         let mut loaded = HashMap::new();
-        match tts::for_language(&voices, expected).and_then(Voice::load) {
-            Ok(voice) => {
-                loaded.insert(expected.clone(), voice);
+        if config.mode.kind == ModeKind::Shared {
+            // Both directions' voices now, so neither person's first turn
+            // waits on a load. A side whose voice is missing is refused by the
+            // window when its key is pressed, so here it is only reported.
+            for side in [Side::Left, Side::Right] {
+                let recognizer = asr.selected_engine.as_ref();
+                match shared::direction(side, &config.shared, recognizer, &voices) {
+                    Ok(resolved) => {
+                        let folder = resolved.direction.voice;
+                        if loaded.contains_key(&folder) {
+                            continue;
+                        }
+                        let _ =
+                            events.send(PipelineMsg::Loading(format!("the voice \"{folder}\"")));
+                        match voices
+                            .iter()
+                            .find(|v| v.dir_name == folder)
+                            .map(Voice::load)
+                        {
+                            Some(Ok(voice)) => {
+                                loaded.insert(folder, voice);
+                            }
+                            Some(Err(e)) => {
+                                warn!("{e:#}");
+                                let _ = events.send(PipelineMsg::Error(format!("{e:#}")));
+                            }
+                            None => {}
+                        }
+                    }
+                    Err(why) => warn!("shared machine, {side} side: {why}"),
+                }
             }
-            // Paired, a missing voice costs the other side's speech, not the
-            // conversation: what arrives is still captioned.
-            Err(e) if paired => {
-                let message =
-                    format!("{e:#}. What the other PC sends will be shown but not spoken.");
-                warn!("{message}");
-                let _ = events.send(PipelineMsg::Error(message));
+        } else {
+            let expected = if paired {
+                &config.languages.source
+            } else {
+                &config.languages.target
+            };
+            let _ = events.send(PipelineMsg::Loading(format!("a voice for \"{expected}\"")));
+            match tts::for_language(&voices, expected).and_then(|engine| {
+                Voice::load(engine).map(|voice| (engine.dir_name.clone(), voice))
+            }) {
+                Ok((folder, voice)) => {
+                    loaded.insert(folder, voice);
+                }
+                // Paired, a missing voice costs the other side's speech, not
+                // the conversation: what arrives is still captioned.
+                Err(e) if paired => {
+                    let message =
+                        format!("{e:#}. What the other PC sends will be shown but not spoken.");
+                    warn!("{message}");
+                    let _ = events.send(PipelineMsg::Error(message));
+                }
+                Err(e) => return Err(e),
             }
-            Err(e) => return Err(e),
         }
         let player = Player::open(
             &config.audio.output_device,
@@ -440,6 +510,7 @@ fn run(root: &Path, config: &Config, options: &Options, wiring: RunWiring) -> Re
             player,
             speak_rx,
             stop.clone(),
+            generation.clone(),
             events.clone(),
         )?;
         Some(control)
@@ -463,9 +534,8 @@ fn run(root: &Path, config: &Config, options: &Options, wiring: RunWiring) -> Re
         };
         Some(spawn_translator(
             &model,
-            config.languages.source.clone(),
-            config.languages.target.clone(),
             route,
+            generation.clone(),
             events.clone(),
         )?)
     };
@@ -500,6 +570,8 @@ fn run(root: &Path, config: &Config, options: &Options, wiring: RunWiring) -> Re
     let stage = Stage {
         selected_name: &selected_name,
         language: &language,
+        target: &config.languages.target,
+        generation: &generation,
         translate_tx: translate_tx.as_ref(),
         segments_dir: options.write_wav.then_some(&segments_dir),
         events,
@@ -560,7 +632,7 @@ fn run(root: &Path, config: &Config, options: &Options, wiring: RunWiring) -> Re
                         );
                     } else {
                         for segment in segmenter.flush() {
-                            stage.handle(segment, None, false, &mut ring, &mut asr);
+                            stage.handle(segment, None, false, None, &mut ring, &mut asr);
                         }
                     }
                     if let Some(open) = mic.take() {
@@ -569,6 +641,9 @@ fn run(root: &Path, config: &Config, options: &Options, wiring: RunWiring) -> Re
                     mode = next;
                     segmenter.reset(captured);
                     hearing_speech = false;
+                    if mode == ModeKind::Shared {
+                        prepare_shared(&mut asr, &config.shared, events);
+                    }
                     if mode == ModeKind::Continuous {
                         mic = Some(Mic::open(device)?);
                     }
@@ -576,33 +651,67 @@ fn run(root: &Path, config: &Config, options: &Options, wiring: RunWiring) -> Re
                     let _ = events.send(PipelineMsg::Mode(mode));
                 }
                 PipelineCmd::BeginTurn if mode == ModeKind::Turn && turn.is_none() => {
+                    if let Some(open) = open_turn(device, playback.as_ref(), None, events) {
+                        segmenter.reset(captured);
+                        hearing_speech = false;
+                        mic = Some(open);
+                        turn = Some(Turn {
+                            origin: captured,
+                            audio: Vec::new(),
+                            segments: Vec::new(),
+                            direction: None,
+                        });
+                    }
+                }
+                PipelineCmd::BeginSharedTurn(direction)
+                    if mode == ModeKind::Shared && turn.is_none() =>
+                {
+                    info!(
+                        "shared machine: {} turn; recognising \"{}\", translating into \"{}\", \
+                         voice \"{}\"",
+                        direction.side, direction.source, direction.target, direction.voice
+                    );
+                    if let Some(open) =
+                        open_turn(device, playback.as_ref(), Some(direction.side), events)
+                    {
+                        segmenter.reset(captured);
+                        hearing_speech = false;
+                        mic = Some(open);
+                        turn = Some(Turn {
+                            origin: captured,
+                            audio: Vec::new(),
+                            segments: Vec::new(),
+                            direction: Some(direction),
+                        });
+                    }
+                }
+                PipelineCmd::Cancel => {
+                    // Whatever is in flight becomes stale: queued translations
+                    // and speech from before this are dropped when reached.
+                    let now = generation.fetch_add(1, Ordering::SeqCst) + 1;
+                    if let Some(active) = turn.take() {
+                        if let Some(open) = mic.take() {
+                            dropped += open.close();
+                        }
+                        segmenter.reset(captured);
+                        hearing_speech = false;
+                        let side = active
+                            .direction
+                            .as_ref()
+                            .map(|d| d.side.to_string())
+                            .unwrap_or_default();
+                        info!(
+                            "turn cancelled ({side}): {} ms of audio discarded, microphone closed",
+                            active.audio.len() as u64 * 1000 / SAMPLE_RATE as u64
+                        );
+                    } else {
+                        info!("cancelled: anything being translated or spoken is dropped");
+                    }
                     if let Some(playback) = &playback {
-                        playback.begin_turn();
+                        playback.stop();
                     }
-                    match Mic::open(device) {
-                        Ok(open) => {
-                            segmenter.reset(captured);
-                            hearing_speech = false;
-                            mic = Some(open);
-                            turn = Some(Turn {
-                                origin: captured,
-                                audio: Vec::new(),
-                                segments: Vec::new(),
-                            });
-                            info!("turn started: microphone open");
-                            let _ = events.send(PipelineMsg::TurnStarted);
-                        }
-                        // A device that will not open fails this turn, not the
-                        // session: the user can plug it back in and try again.
-                        Err(e) => {
-                            if let Some(playback) = &playback {
-                                playback.end_turn();
-                            }
-                            warn!("cannot start a turn: {e:#}");
-                            let _ = events
-                                .send(PipelineMsg::Error(format!("cannot start a turn: {e:#}")));
-                        }
-                    }
+                    debug!("cancel generation is now {now}");
+                    let _ = events.send(PipelineMsg::TurnCancelled);
                 }
                 PipelineCmd::EndTurn => {
                     if let Some(active) = turn.take() {
@@ -622,6 +731,7 @@ fn run(root: &Path, config: &Config, options: &Options, wiring: RunWiring) -> Re
                 // commands are the peer thread's, not this one's.
                 PipelineCmd::SetMode(_)
                 | PipelineCmd::BeginTurn
+                | PipelineCmd::BeginSharedTurn(_)
                 | PipelineCmd::Connect(_)
                 | PipelineCmd::Disconnect => {}
             }
@@ -669,7 +779,7 @@ fn run(root: &Path, config: &Config, options: &Options, wiring: RunWiring) -> Re
                     }
                     None => {
                         for segment in segments {
-                            stage.handle(segment, None, false, &mut ring, &mut asr);
+                            stage.handle(segment, None, false, None, &mut ring, &mut asr);
                         }
                     }
                 }
@@ -719,7 +829,7 @@ fn run(root: &Path, config: &Config, options: &Options, wiring: RunWiring) -> Re
         );
     } else {
         for segment in segmenter.flush() {
-            stage.handle(segment, None, false, &mut ring, &mut asr);
+            stage.handle(segment, None, false, None, &mut ring, &mut asr);
         }
     }
     if let Some(open) = mic.take() {
@@ -745,6 +855,58 @@ fn describe_mode(mode: ModeKind) -> &'static str {
     match mode {
         ModeKind::Continuous => "listening continuously",
         ModeKind::Turn => "waiting for a turn, microphone closed",
+        ModeKind::Shared => "shared machine, waiting for either person's key, microphone closed",
+    }
+}
+
+/// Open the microphone for a turn, stopping and holding any reply first.
+/// A device that will not open fails this turn, not the session: the user can
+/// plug it back in and try again.
+fn open_turn(
+    device: &str,
+    playback: Option<&PlaybackControl>,
+    side: Option<Side>,
+    events: &Sender<PipelineMsg>,
+) -> Option<Mic> {
+    if let Some(playback) = playback {
+        playback.begin_turn();
+    }
+    match Mic::open(device) {
+        Ok(open) => {
+            info!("turn started: microphone open");
+            let _ = events.send(PipelineMsg::TurnStarted { side });
+            Some(open)
+        }
+        Err(e) => {
+            if let Some(playback) = playback {
+                playback.end_turn();
+            }
+            warn!("cannot start a turn: {e:#}");
+            let _ = events.send(PipelineMsg::Error(format!("cannot start a turn: {e:#}")));
+            None
+        }
+    }
+}
+
+/// Build Whisper's recognizer for both shared-machine languages ahead of the
+/// first turn. A failure is reported, not fatal: that side's turns will say
+/// why when tried.
+fn prepare_shared(
+    asr: &mut Recognizers,
+    settings: &crate::config::Shared,
+    events: &Sender<PipelineMsg>,
+) {
+    let Some(selected) = asr.selected.as_mut() else {
+        return;
+    };
+    for language in [&settings.left_language, &settings.right_language] {
+        let _ = events.send(PipelineMsg::Loading(format!(
+            "the recognizer for \"{language}\""
+        )));
+        if let Err(e) = selected.prepare(language) {
+            warn!("cannot prepare the recognizer for \"{language}\": {e:#}");
+            let _ = events.send(PipelineMsg::Error(format!("{e:#}")));
+        }
     }
 }
 
@@ -776,11 +938,16 @@ struct Turn {
     origin: u64,
     audio: Vec<f32>,
     segments: Vec<Segment>,
+    /// Shared-machine mode: whose turn, and where its words go.
+    direction: Option<Direction>,
 }
 
 /// The recognizers a run has loaded.
 struct Recognizers {
     selected: Option<Box<dyn SegmentAsr + Send>>,
+    /// The selected recognizer's description, for shared-machine mode's
+    /// language check.
+    selected_engine: Option<Engine>,
     comparison: Vec<(String, Box<dyn SegmentAsr + Send>)>,
 }
 
@@ -814,6 +981,7 @@ fn finish_turn(
         origin,
         audio,
         mut segments,
+        direction,
     } = active;
     segments.extend(segmenter.flush());
     let turn_ms = audio.len() as u64 * 1000 / SAMPLE_RATE as u64;
@@ -839,7 +1007,7 @@ fn finish_turn(
                 start_sample: origin + speech.start as u64,
                 samples: audio[speech].to_vec(),
             };
-            stage.handle(segment, Some(&parts), true, ring, asr);
+            stage.handle(segment, Some(&parts), true, direction.as_ref(), ring, asr);
         }
     }
     dropped
@@ -920,6 +1088,13 @@ struct ToTranslate {
     /// The utterance of a paired turn: once it has been sent, the floor goes
     /// back to the other PC (SPEC §9).
     ends_turn: bool,
+    /// What it is in, and what to translate it into.
+    source: String,
+    target: String,
+    /// The voice to speak it with, when a particular one was chosen.
+    voice: Option<String>,
+    /// The cancel generation it belongs to.
+    generation: u64,
 }
 
 /// Where a finished translation goes.
@@ -938,9 +1113,8 @@ enum Route {
 /// rather than a thread that quietly dies later.
 fn spawn_translator(
     model: &Path,
-    source: String,
-    target: String,
     route: Route,
+    generation: Arc<AtomicU64>,
     events: Sender<PipelineMsg>,
 ) -> Result<(SyncSender<ToTranslate>, JoinHandle<()>)> {
     let mut translator = LlamaTranslator::load(model)?;
@@ -950,15 +1124,20 @@ fn spawn_translator(
         .name("cnverc-translate".to_string())
         .spawn(move || {
             while let Ok(job) = rx.recv() {
-                if let Some(text) = translate_one(&mut translator, &job, &source, &target, &events)
-                {
+                if job.generation < generation.load(Ordering::SeqCst) {
+                    info!("utterance {}: cancelled; not translated", job.index);
+                    continue;
+                }
+                if let Some(text) = translate_one(&mut translator, &job, &events) {
                     match &route {
                         Route::Speak(speaker) => {
                             let spoken = SpeakJob {
                                 index: Some(job.index),
-                                lang: target.clone(),
+                                lang: job.target.clone(),
                                 text,
                                 since: job.captured_at,
+                                voice: job.voice.clone(),
+                                generation: Some(job.generation),
                             };
                             if let Err(TrySendError::Full(_)) = speaker.try_send(spoken) {
                                 warn!("speech is behind; utterance {} not spoken", job.index);
@@ -971,9 +1150,9 @@ fn spawn_translator(
                         }
                         Route::Peer(peer) => peer.send(PeerCmd::Deliver(Outgoing {
                             index: job.index,
-                            lang: target.clone(),
+                            lang: job.target.clone(),
                             text,
-                            source_lang: source.clone(),
+                            source_lang: job.source.clone(),
                             source_text: job.text.clone(),
                         })),
                         Route::Nowhere => {}
@@ -1000,10 +1179,9 @@ fn spawn_translator(
 fn translate_one(
     translator: &mut LlamaTranslator,
     job: &ToTranslate,
-    source: &str,
-    target: &str,
     events: &Sender<PipelineMsg>,
 ) -> Option<String> {
+    let (source, target) = (job.source.as_str(), job.target.as_str());
     let began = Instant::now();
     let text = match translator.translate(&job.text, source, target) {
         Ok(text) if text.is_empty() => {
@@ -1032,6 +1210,7 @@ fn translate_one(
     let _ = events.send(PipelineMsg::Translated {
         index: job.index,
         target: text.clone(),
+        lang: target.to_string(),
         translate_ms,
     });
     Some(text)
@@ -1047,6 +1226,7 @@ fn spawn_speaker(
     player: Player,
     rx: Receiver<SpeakJob>,
     stop: Arc<AtomicBool>,
+    generation: Arc<AtomicU64>,
     events: Sender<PipelineMsg>,
 ) -> Result<JoinHandle<()>> {
     std::thread::Builder::new()
@@ -1064,20 +1244,38 @@ fn spawn_speaker(
                     Some(index) => format!("utterance {index}"),
                     None => "the other PC's utterance".to_string(),
                 };
-                if !loaded.contains_key(&job.lang) {
-                    match tts::for_language(&voices, &job.lang).and_then(Voice::load) {
-                        Ok(voice) => {
-                            loaded.insert(job.lang.clone(), voice);
+                if job
+                    .generation
+                    .is_some_and(|g| g < generation.load(Ordering::SeqCst))
+                {
+                    info!("{label}: cancelled; not spoken");
+                    continue;
+                }
+                let folder = match choose_voice(&voices, &job) {
+                    Ok(folder) => folder,
+                    Err(e) => {
+                        warn!("{label}: {e:#}");
+                        let _ = events
+                            .send(PipelineMsg::Error(format!("{label} was not spoken: {e:#}")));
+                        continue;
+                    }
+                };
+                if !loaded.contains_key(&folder) {
+                    let engine = voices.iter().find(|v| v.dir_name == folder);
+                    match engine.map(Voice::load) {
+                        Some(Ok(voice)) => {
+                            loaded.insert(folder.clone(), voice);
                         }
-                        Err(e) => {
+                        Some(Err(e)) => {
                             warn!("{label}: {e:#}");
                             let _ = events
                                 .send(PipelineMsg::Error(format!("{label} was not spoken: {e:#}")));
                             continue;
                         }
+                        None => continue,
                     }
                 }
-                let Some(voice) = loaded.get(&job.lang) else {
+                let Some(voice) = loaded.get(&folder) else {
                     continue;
                 };
                 speak_one(voice, &player, &job, &label, &events);
@@ -1085,6 +1283,29 @@ fn spawn_speaker(
             info!("speaking stopped");
         })
         .context("cannot spawn the speaking thread")
+}
+
+/// The folder of the voice that speaks a job: the one it names, when that is
+/// installed, usable and speaks its language; otherwise the first voice for
+/// its language. The window has already warned about a missing chosen voice.
+fn choose_voice(voices: &[Engine], job: &SpeakJob) -> Result<String> {
+    if let Some(folder) = &job.voice {
+        let named = voices.iter().find(|v| {
+            &v.dir_name == folder
+                && v.enabled()
+                && v.languages
+                    .iter()
+                    .any(|l| l.eq_ignore_ascii_case(&job.lang))
+        });
+        if let Some(engine) = named {
+            return Ok(engine.dir_name.clone());
+        }
+        warn!(
+            "the voice \"{folder}\" is not usable for \"{}\"; using the first that is",
+            job.lang
+        );
+    }
+    tts::for_language(voices, &job.lang).map(|engine| engine.dir_name.clone())
 }
 
 /// Synthesise one utterance and hand it to the sound card.
@@ -1139,7 +1360,10 @@ fn speak_one(
 /// What handling one utterance needs that does not change between them.
 struct Stage<'a> {
     selected_name: &'a str,
+    /// The run's languages. A shared-machine turn brings its own instead.
     language: &'a str,
+    target: &'a str,
+    generation: &'a AtomicU64,
     translate_tx: Option<&'a SyncSender<ToTranslate>>,
     segments_dir: Option<&'a PathBuf>,
     events: &'a Sender<PipelineMsg>,
@@ -1157,10 +1381,14 @@ impl Stage<'_> {
         segment: Segment,
         parts: Option<&[Range<usize>]>,
         ends_turn: bool,
+        direction: Option<&Direction>,
         ring: &mut UtteranceRing,
         asr: &mut Recognizers,
     ) {
         let mut queued = false;
+        let source = direction.map_or(self.language, |d| d.source.as_str());
+        let target = direction.map_or(self.target, |d| d.target.as_str());
+        let voice = direction.map(|d| d.voice.clone());
         let captured_at = Instant::now();
         let (start_ms, end_ms, duration_ms) =
             (segment.start_ms(), segment.end_ms(), segment.duration_ms());
@@ -1173,7 +1401,10 @@ impl Stage<'_> {
 
         if let Some(selected) = asr.selected.as_mut() {
             let began = Instant::now();
-            match transcribe_parts(selected, &utterance.pcm, parts, self.language) {
+            // Logged every time: if the key's language were lost, Whisper would
+            // guess, be right most of the time, and hide the bug.
+            info!("  transcribing as \"{source}\"");
+            match transcribe_parts(selected, &utterance.pcm, parts, source) {
                 // No words: usually a cough, sometimes real speech the
                 // recognizer failed on. Neither is sent to the translator, and
                 // both are reported, because a failed utterance that vanishes
@@ -1194,17 +1425,26 @@ impl Stage<'_> {
                 Ok(text) => {
                     let asr_ms = began.elapsed().as_millis();
                     info!(
-                        "  [{}] {text}\n  ({asr_ms} ms to transcribe {} ms of audio)",
-                        self.language,
+                        "  [{source}] {text}\n  ({asr_ms} ms to transcribe {} ms of audio)",
                         utterance.duration_ms()
                     );
                     let _ = self.events.send(PipelineMsg::Final {
                         index: utterance.index,
                         text: text.clone(),
+                        lang: source.to_string(),
                         speech_ms: utterance.duration_ms(),
                         asr_ms,
                     });
-                    queued = self.send_to_translator(utterance.index, text, captured_at, ends_turn);
+                    queued = self.send_to_translator(ToTranslate {
+                        index: utterance.index,
+                        text,
+                        captured_at,
+                        ends_turn,
+                        source: source.to_string(),
+                        target: target.to_string(),
+                        voice,
+                        generation: self.generation.load(Ordering::SeqCst),
+                    });
                 }
                 Err(e) => {
                     warn!("  transcription failed: {e:#}");
@@ -1217,7 +1457,7 @@ impl Stage<'_> {
         }
 
         if !asr.comparison.is_empty() {
-            let comparison = compare::run_all(&mut asr.comparison, &utterance, self.language);
+            let comparison = compare::run_all(&mut asr.comparison, &utterance, source);
             compare::report(&comparison, self.selected_name);
             let _ = self.events.send(PipelineMsg::Comparison(comparison));
         }
@@ -1237,23 +1477,12 @@ impl Stage<'_> {
     }
 
     /// Queue a transcript for translation. Returns whether it was queued.
-    fn send_to_translator(
-        &self,
-        index: usize,
-        text: String,
-        captured_at: Instant,
-        ends_turn: bool,
-    ) -> bool {
+    fn send_to_translator(&self, job: ToTranslate) -> bool {
         let Some(tx) = self.translate_tx else {
             return false;
         };
         // Never block the pipeline thread on the translator.
-        match tx.try_send(ToTranslate {
-            index,
-            text,
-            captured_at,
-            ends_turn,
-        }) {
+        match tx.try_send(job) {
             Ok(()) => true,
             Err(TrySendError::Full(job)) => {
                 warn!(
@@ -1682,7 +1911,7 @@ mod tests {
                         | PipelineMsg::SpeechStarted
                         | PipelineMsg::Final { .. }
                         | PipelineMsg::NothingRecognized { .. }
-                        | PipelineMsg::TurnStarted
+                        | PipelineMsg::TurnStarted { .. }
                 )
             },
             sentence_time,
@@ -1699,7 +1928,7 @@ mod tests {
         // 2. A turn: the same sentence is heard, whole.
         pipeline.send(PipelineCmd::BeginTurn);
         wait_for(
-            &|m| matches!(m, PipelineMsg::TurnStarted),
+            &|m| matches!(m, PipelineMsg::TurnStarted { .. }),
             Duration::from_secs(5),
         )
         .expect("the turn never started");

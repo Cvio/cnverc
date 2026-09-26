@@ -589,6 +589,10 @@ impl Peer {
                     lang,
                     text,
                     since: Instant::now(),
+                    // The voice for the utterance's own language; never
+                    // cancelled, since shared-machine mode can't be paired.
+                    voice: None,
+                    generation: None,
                 }) {
                     Ok(()) => {}
                     // No speaker: speech is off. Captions are enough.

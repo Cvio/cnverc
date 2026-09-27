@@ -155,21 +155,21 @@ impl Voice {
 pub fn for_language<'a>(engines: &'a [Engine], language: &str) -> Result<&'a Engine> {
     let usable: Vec<&Engine> = engines.iter().filter(|e| e.enabled()).collect();
 
-    let matching: Vec<&&Engine> = usable
-        .iter()
-        .filter(|e| e.languages.iter().any(|l| l.eq_ignore_ascii_case(language)))
-        .collect();
+    // Best fit first: tuned for the variety, then general, then other
+    // varieties (models::rank). This is what decides between two Spanish voices.
+    let matching = crate::models::rank(language, engines);
 
     match matching.first() {
-        Some(engine) => {
+        Some(best) => {
             if matching.len() > 1 {
                 info!(
-                    "{} voices speak \"{language}\"; using \"{}\"",
+                    "{} voices speak \"{language}\"; using \"{}\" ({})",
                     matching.len(),
-                    engine.dir_name
+                    best.engine.dir_name,
+                    best.fit.label(language)
                 );
             }
-            Ok(engine)
+            Ok(best.engine)
         }
         None => Err(anyhow!(
             "no installed voice speaks \"{language}\". Voices found: {}",

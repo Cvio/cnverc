@@ -1684,19 +1684,33 @@ impl App {
     /// spoken in.
     fn shared_settings(&mut self, ui: &mut egui::Ui, side: Side) -> bool {
         let languages = self.known_languages();
-        let voices: Vec<(String, String)> =
-            shared::voices_for(side.other().language(&self.config.shared), &self.voices)
+        let voices: Vec<(String, String)> = {
+            let spoken = side.other().language(&self.config.shared).to_string();
+            shared::voices_for(&spoken, &self.voices)
                 .into_iter()
-                .map(|v| (v.dir_name.clone(), v.name.clone()))
-                .collect();
+                .map(|v| {
+                    (
+                        v.engine.dir_name.clone(),
+                        format!("{} — {}", v.engine.name, v.fit.label(&spoken)),
+                    )
+                })
+                .collect()
+        };
         // Only recognizers that list this side's language, and what "best
         // match" would pick right now.
         let engines = self.asr_engines();
-        let recognizers: Vec<(String, String)> =
-            shared::recognizers_for(side.language(&self.config.shared), &engines)
+        let recognizers: Vec<(String, String)> = {
+            let heard = side.language(&self.config.shared).to_string();
+            shared::recognizers_for(&heard, &engines)
                 .into_iter()
-                .map(|e| (e.dir_name.clone(), e.name.clone()))
-                .collect();
+                .map(|r| {
+                    (
+                        r.engine.dir_name.clone(),
+                        format!("{} — {}", r.engine.name, r.fit.label(&heard)),
+                    )
+                })
+                .collect()
+        };
         let best = {
             let mut unset = self.config.shared.clone();
             match side {

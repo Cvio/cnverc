@@ -192,6 +192,70 @@ pub struct Engine {
     pub files: Vec<ModelFile>,
 }
 
+/// How well a model fits a language or variety, best first.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub enum Fit {
+    /// Tuned for exactly the variety asked for.
+    Tuned,
+    /// Covers the language, with no variety of it declared.
+    General,
+    /// Tuned for a different variety of the same language, named so nobody
+    /// picks it by accident.
+    Other(String),
+}
+
+impl Fit {
+    /// How a picker labels it.
+    pub fn label(&self, asked: &str) -> String {
+        match self {
+            Fit::Tuned => format!("tuned for {}", varieties::display_name(asked)),
+            Fit::General => "general".to_string(),
+            Fit::Other(variety) => format!("tuned for {}", varieties::display_name(variety)),
+        }
+    }
+}
+
+/// A model and how it fits.
+#[derive(Debug, Clone)]
+pub struct Ranked<'a> {
+    pub engine: &'a Engine,
+    pub fit: Fit,
+}
+
+/// The usable models for a language or variety (`es`, `es-MX`), best first:
+/// tuned for exactly that variety, then general models of its language, then
+/// models tuned for another variety of it. For a plain language, general
+/// models come first. Models that don't cover the language at all aren't
+/// listed. Within each group, discovery order (folder name) is kept.
+pub fn rank<'a>(tag: &str, engines: &'a [Engine]) -> Vec<Ranked<'a>> {
+    let language = varieties::language_of(tag);
+    let mut ranked: Vec<Ranked<'a>> = engines
+        .iter()
+        .filter(|e| e.enabled() && e.languages.iter().any(|l| l.eq_ignore_ascii_case(language)))
+        .map(|engine| {
+            let own: Vec<&String> = engine
+                .varieties
+                .iter()
+                .filter(|v| varieties::language_of(v).eq_ignore_ascii_case(language))
+                .collect();
+            let fit = if own.iter().any(|v| v.eq_ignore_ascii_case(tag.trim())) {
+                Fit::Tuned
+            } else if let Some(other) = own.first() {
+                Fit::Other((*other).clone())
+            } else {
+                Fit::General
+            };
+            Ranked { engine, fit }
+        })
+        .collect();
+    ranked.sort_by_key(|r| match r.fit {
+        Fit::Tuned => 0,
+        Fit::General => 1,
+        Fit::Other(_) => 2,
+    });
+    ranked
+}
+
 /// A declared support directory and whether it is actually there.
 #[derive(Debug, Clone)]
 pub struct ModelDir {
@@ -540,6 +604,53 @@ tokens  = "tokens.txt"
         assert_eq!(entries.len(), 2);
         assert!(matches!(entries[0], Entry::Failed { .. }));
         assert!(matches!(&entries[1], Entry::Loaded(e) if e.enabled()));
+    }
+
+    fn voice_tuned(dir_name: &str, varieties: &[&str]) -> Engine {
+        Engine {
+            data_dir: None,
+            dir_name: dir_name.to_string(),
+            dir: PathBuf::from(dir_name),
+            name: dir_name.to_string(),
+            kind: EngineKind::Segment,
+            backend: Backend::Tts(TtsBackend::Vits),
+            languages: vec!["es".to_string()],
+            varieties: varieties.iter().map(|v| v.to_string()).collect(),
+            files: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn models_are_ranked_tuned_then_general_then_other_varieties() {
+        // Deliberately in the "wrong" folder order.
+        let voices = [
+            voice_tuned("a-spain", &["es-ES"]),
+            voice_tuned("b-general", &[]),
+            voice_tuned("c-mexico", &["es-MX"]),
+        ];
+        let order = |tag: &str| -> Vec<(String, Fit)> {
+            rank(tag, &voices)
+                .into_iter()
+                .map(|r| (r.engine.dir_name.clone(), r.fit))
+                .collect()
+        };
+        assert_eq!(
+            order("es-MX"),
+            vec![
+                ("c-mexico".to_string(), Fit::Tuned),
+                ("b-general".to_string(), Fit::General),
+                ("a-spain".to_string(), Fit::Other("es-ES".to_string())),
+            ]
+        );
+        // A plain language: general first, then the varieties, labelled.
+        assert_eq!(order("es")[0], ("b-general".to_string(), Fit::General));
+        assert_eq!(
+            Fit::Other("es-ES".into()).label("es-MX"),
+            "tuned for Spanish (Spain)"
+        );
+        assert_eq!(Fit::Tuned.label("es-MX"), "tuned for Spanish (Mexico)");
+        // Another language entirely: nothing listed.
+        assert!(rank("ar-IQ", &voices).is_empty());
     }
 
     #[test]

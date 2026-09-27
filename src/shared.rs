@@ -13,7 +13,7 @@
 use std::fmt;
 
 use crate::config::Shared;
-use crate::models::{AsrBackend, Backend, Engine};
+use crate::models::{AsrBackend, Backend, Engine, Ranked};
 
 /// Which person pressed their key.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -130,21 +130,23 @@ pub fn recognizer_for<'a>(
         }
         return Ok(engine);
     }
-    let covers = |e: &&Engine| e.enabled() && declares(e, language);
-    recognizers
+    // The best-fitting group (models::rank); within it, the main recognizer
+    // if it is there, so an unset side doesn't load a second model for nothing.
+    let ranked = crate::models::rank(language, recognizers);
+    let best = ranked.first().ok_or_else(|| {
+        format!("no installed recognizer lists \"{language}\" among its languages")
+    })?;
+    Ok(ranked
         .iter()
-        .filter(covers)
-        .find(|e| e.dir_name == preferred)
-        .or_else(|| recognizers.iter().find(covers))
-        .ok_or_else(|| format!("no installed recognizer lists \"{language}\" among its languages"))
+        .take_while(|r| r.fit == best.fit)
+        .find(|r| r.engine.dir_name == preferred)
+        .unwrap_or(best)
+        .engine)
 }
 
 /// The usable recognizers that list `language`, for a side's picker.
-pub fn recognizers_for<'a>(language: &str, recognizers: &'a [Engine]) -> Vec<&'a Engine> {
-    recognizers
-        .iter()
-        .filter(|e| e.enabled() && declares(e, language))
-        .collect()
+pub fn recognizers_for<'a>(language: &str, recognizers: &'a [Engine]) -> Vec<Ranked<'a>> {
+    crate::models::rank(language, recognizers)
 }
 
 /// Work out where one turn's words go, or why there can be no turn.
@@ -164,6 +166,9 @@ pub fn direction(
     if source.is_empty() || target.is_empty() {
         return Err("choose a language for both sides".to_string());
     }
+    // A tag the table doesn't know is refused here, where the column shows it.
+    crate::varieties::require(&source)?;
+    crate::varieties::require(&target)?;
     if source == target {
         return Err(format!(
             "both sides are set to \"{source}\"; choose a different language for each"
@@ -190,6 +195,7 @@ pub fn direction(
             let fallback = voices_for(&target, voices)
                 .into_iter()
                 .next()
+                .map(|r| r.engine)
                 .ok_or_else(|| {
                     format!(
                     "no installed voice speaks \"{target}\", so this side's words could not be \
@@ -221,14 +227,13 @@ pub fn direction(
 
 /// The usable voices that speak `language`, in discovery order, for a side's
 /// voice picker.
-pub fn voices_for<'a>(language: &str, voices: &'a [Engine]) -> Vec<&'a Engine> {
-    voices
-        .iter()
-        .filter(|v| v.enabled() && declares(v, language))
-        .collect()
+pub fn voices_for<'a>(language: &str, voices: &'a [Engine]) -> Vec<Ranked<'a>> {
+    crate::models::rank(language, voices)
 }
 
-fn declares(engine: &Engine, language: &str) -> bool {
+/// Whether a model lists the language of a tag (`es` for `es-MX`).
+fn declares(engine: &Engine, tag: &str) -> bool {
+    let language = crate::varieties::language_of(tag);
     engine
         .languages
         .iter()
@@ -470,10 +475,23 @@ mod tests {
     }
 
     #[test]
+    fn a_side_set_to_a_variety_hears_its_language_and_an_unknown_tag_is_refused() {
+        let mut s = settings();
+        s.right_language = "es-MX".into();
+        let r = direction(Side::Right, &s, &[whisper()], "whisper", &voices())
+            .expect("es-MX is Spanish");
+        assert_eq!(r.direction.source, "es-MX");
+        s.right_language = "xx-YY".into();
+        let why =
+            direction(Side::Right, &s, &[whisper()], "whisper", &voices()).expect_err("unknown");
+        assert!(why.contains("xx-YY"), "{why}");
+    }
+
+    #[test]
     fn the_picker_lists_only_usable_voices_for_the_language() {
         let names: Vec<_> = voices_for("es", &voices())
             .iter()
-            .map(|v| v.dir_name.clone())
+            .map(|v| v.engine.dir_name.clone())
             .collect();
         assert_eq!(names, vec!["piper-es-es", "piper-es-mx"]);
     }

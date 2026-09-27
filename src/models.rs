@@ -25,6 +25,8 @@ use serde::Deserialize;
 use thiserror::Error;
 use tracing::warn;
 
+use crate::varieties;
+
 /// The file that describes a model directory to `cnverc`.
 pub const ENGINE_TOML: &str = "engine.toml";
 
@@ -143,6 +145,12 @@ pub enum EngineError {
         backend: Backend,
         role: &'static str,
     },
+    #[error("{path} lists variety \"{variety}\": {reason}")]
+    BadVariety {
+        path: PathBuf,
+        variety: String,
+        reason: String,
+    },
     #[error("{path} has [files].{role} = \"{value}\"; it must be a plain filename inside the model directory")]
     NotAPlainFilename {
         path: PathBuf,
@@ -177,6 +185,9 @@ pub struct Engine {
     pub kind: EngineKind,
     pub backend: Backend,
     pub languages: Vec<String>,
+    /// The varieties (dialects) it is tuned for, e.g. `es-MX`. Optional; each
+    /// belongs to one of `languages`. Empty means general.
+    pub varieties: Vec<String>,
     /// Declared files, keyed by role, in a stable order for display.
     pub files: Vec<ModelFile>,
 }
@@ -243,6 +254,9 @@ struct RawEngine {
     backend: String,
     #[serde(default)]
     languages: Vec<String>,
+    /// Optional: the varieties it is tuned for, e.g. `["es-MX"]`.
+    #[serde(default)]
+    varieties: Vec<String>,
     /// Optional support directory, e.g. `espeak-ng-data` for a Piper voice.
     #[serde(default)]
     data_dir: Option<String>,
@@ -319,6 +333,39 @@ pub fn load_engine(dir: &Path, role: Role) -> Result<Engine, EngineError> {
         }
     };
 
+    // Every variety must be one cnverc knows, and belong to a language the
+    // model lists: a Spanish voice tuned for "fr-FR" is a mistake to show,
+    // not a model to use.
+    for variety in &raw.varieties {
+        let reason = match varieties::lookup(variety) {
+            None => Some("not a variety cnverc knows (add it to src/varieties.rs)".to_string()),
+            Some(_) if !varieties::has_variety(variety) => Some(
+                "a variety names a region, like \"es-MX\"; plain languages go in `languages`"
+                    .to_string(),
+            ),
+            Some(_) => {
+                let language = varieties::language_of(variety);
+                (!raw
+                    .languages
+                    .iter()
+                    .any(|l| l.eq_ignore_ascii_case(language)))
+                .then(|| {
+                    format!(
+                        "its language \"{language}\" is not in `languages` ({})",
+                        raw.languages.join(", ")
+                    )
+                })
+            }
+        };
+        if let Some(reason) = reason {
+            return Err(EngineError::BadVariety {
+                path: toml_path.clone(),
+                variety: variety.clone(),
+                reason,
+            });
+        }
+    }
+
     let dir_name = dir
         .file_name()
         .map(|n| n.to_string_lossy().into_owned())
@@ -332,6 +379,7 @@ pub fn load_engine(dir: &Path, role: Role) -> Result<Engine, EngineError> {
         kind: raw.kind,
         backend,
         languages: raw.languages,
+        varieties: raw.varieties,
         files,
     })
 }
@@ -492,6 +540,53 @@ tokens  = "tokens.txt"
         assert_eq!(entries.len(), 2);
         assert!(matches!(entries[0], Entry::Failed { .. }));
         assert!(matches!(&entries[1], Entry::Loaded(e) if e.enabled()));
+    }
+
+    #[test]
+    fn varieties_must_belong_to_a_listed_language() {
+        let voice = |varieties: &str| {
+            format!(
+                "name = \"V\"
+kind = \"segment\"
+backend = \"vits\"
+languages = [\"es\"]
+                 varieties = {varieties}
+
+[files]
+model = \"m.onnx\"
+tokens = \"t.txt\"
+"
+            )
+        };
+        let scratch = Scratch::new("varieties");
+
+        // The example from dialect-per-side.md: French variety, Spanish voice.
+        let dir = scratch.model("wrong", &voice("[\"fr-FR\"]"), &[]);
+        let err = load_engine(&dir, Role::Tts).expect_err("fr-FR is not Spanish");
+        assert!(matches!(err, EngineError::BadVariety { .. }), "{err}");
+        assert!(err.to_string().contains("fr-FR"), "{err}");
+
+        let dir = scratch.model("plain", &voice("[\"es\"]"), &[]);
+        assert!(
+            load_engine(&dir, Role::Tts).is_err(),
+            "a plain language is not a variety"
+        );
+
+        let dir = scratch.model("mexico", &voice("[\"es-MX\"]"), &[]);
+        let engine = load_engine(&dir, Role::Tts).expect("es-MX belongs to es");
+        assert_eq!(engine.varieties, vec!["es-MX"]);
+
+        let dir = scratch.model("general", &voice("[]"), &[]);
+        assert!(load_engine(&dir, Role::Tts)
+            .expect("no varieties")
+            .varieties
+            .is_empty());
+
+        // And through discovery, so --report shows it as broken, with the reason.
+        let entries = discover(&scratch.0, Role::Tts);
+        assert!(entries
+            .iter()
+            .any(|e| matches!(e, Entry::Failed { dir_name, .. } if dir_name == "wrong")));
     }
 
     #[test]

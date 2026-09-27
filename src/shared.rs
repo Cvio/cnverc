@@ -250,6 +250,7 @@ mod tests {
             kind: EngineKind::Segment,
             backend,
             languages: languages.iter().map(|l| l.to_string()).collect(),
+            varieties: Vec::new(),
             files: vec![ModelFile {
                 role: "model".to_string(),
                 name: "model.onnx".to_string(),

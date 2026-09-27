@@ -109,14 +109,12 @@ pub fn require(tag: &str) -> Result<&'static Variety, String> {
 
 /// The language part of a tag: `es` for both `es` and `es-MX`. This is what a
 /// recognizer is told, and what `engine.toml`'s `languages` lists.
-#[allow(dead_code, reason = "used from Part B2-B5")]
 pub fn language_of(tag: &str) -> &str {
     let tag = tag.trim();
     tag.split('-').next().unwrap_or(tag)
 }
 
 /// Whether a tag names a region as well as a language.
-#[allow(dead_code, reason = "used from Part B2-B5")]
 pub fn has_variety(tag: &str) -> bool {
     tag.trim().contains('-')
 }

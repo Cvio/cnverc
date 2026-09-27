@@ -1,8 +1,9 @@
 # Using cnverc: situations and how to handle them
 
-The [README](README.md) tells you how to set cnverc up and what each control does. This guide
-starts from the other end: **you're in a situation, so what do you set up, and how does the
-conversation go?**
+The [README](README.md) gets cnverc set up and running. This guide starts from the other end:
+**you're in a situation, so what do you set up, and how does the conversation go?** It ends
+with the [full troubleshooting table](#when-something-goes-wrong) and a
+[glossary](#words-used-in-cnverc).
 
 Each use case follows the same pattern: who it's for, what you need, how to set it up, how the
 conversation goes, what good looks like, what usually goes wrong, and its limits.
@@ -18,12 +19,13 @@ conversation goes, what good looks like, what usually goes wrong, and its limits
 | No internet anywhere | Any | 1 or 2 | [7](#7-working-with-no-internet) |
 | Checking or fixing recognition | `--compare`, `--wav` | 1 | [8](#8-which-recognizer-hears-me-best-and-why-was-that-wrong) |
 | Using a better or tuned model | - | 1 | [9](#9-adding-a-better-model) |
+| Something isn't working | - | - | [Troubleshooting](#when-something-goes-wrong) |
 
 A few things are true in every case:
 
 - **cnverc translates between two languages at a time.** Out of the box those are English and
   Spanish. Other languages need a voice and a recognizer that know them; see
-  [ARCHITECTURE.md → Add a language](ARCHITECTURE.md#add-a-language).
+  [MODELS.md → Add a language](MODELS.md#add-a-language).
 - **Short, complete sentences work best.** Say one or two sentences per turn, and pause
   briefly before you start.
 - **It takes a second or three** from the end of a sentence to hearing the translation. Leave
@@ -44,13 +46,17 @@ laptop.
 - One PC with speakers. A laptop's built-in speakers are fine in a quiet room.
 - A microphone both people can reach: the laptop's own, or a small USB desk microphone
   between them.
-- **Shared machine** mode, with a **Whisper** recognizer (Parakeet can't be used here).
+- **Shared machine** mode.
 
 **Setting up** (once):
 1. Start cnverc. Under **Mode**, choose **Shared machine**.
-2. Set **Recognizer** to *Whisper large-v3-turbo*.
-3. Above the columns, set **Left person** to the language of whoever sits on the left, and
+2. Above the columns, set **Left person** to the language of whoever sits on the left, and
    **Right person** to the other. Match the screen to where people actually sit: left is left.
+   If someone speaks a regional variety, pick it under **Variety** (for example *Spanish
+   (Mexico)*); leave **(any)** otherwise.
+3. Under each column, **Heard by** chooses the recognizer for that person. **Best match** is
+   fine to start with. Whisper is the safe choice; Parakeet works but guesses the language
+   itself, and the column says so.
 4. Choose microphone and speakers in the settings. Leave **Mute the microphone while
    speaking** ticked.
 5. Press **Start** and wait for both columns to say **Ready**.
@@ -73,8 +79,9 @@ language.
 - **A key does nothing.** Read that person's column. It says why: the other person is
   talking, the PC is still speaking, or their language can't be heard by the chosen
   recognizer. If nothing is shown, click somewhere outside any text box and try again.
-- **One column says it "cannot hear this side".** The recognizer doesn't know that
-  language. Choose *Whisper large-v3-turbo*.
+- **One column says it can't hear that person, or shows a problem.** Its recognizer doesn't
+  know that language, or failed to load. Set that column's **Heard by** to *Whisper
+  large-v3-turbo*.
 - **It translates its own voice.** Make sure **Mute the microphone while speaking** is
   ticked.
 
@@ -125,7 +132,7 @@ person hears the other's words in their own language from their own laptop.
 
 **What you need:**
 - Two PCs with cnverc, on the same network: Wi-Fi, a router with no internet, or one Ethernet
-  cable between them (see the README's network table).
+  cable between them.
 - Speakers on both.
 - **Pair with another PC**, and **Take turns** on both.
 
@@ -233,9 +240,14 @@ that, it never needs internet.
 
 **On Windows, to use another PC with no internet:**
 1. On the PC where you set cnverc up, copy these from its `target\release\` folder onto a USB
-   stick: `cnverc.exe`, `cnverc.toml` and the `models` folder.
-2. On the other PC, copy them into any folder and double-click `cnverc.exe`. Nothing needs
-   installing.
+   stick, into one folder:
+   ```
+   cnverc.exe
+   cnverc.toml
+   models\
+   ```
+2. On the other PC, put that folder anywhere and double-click `cnverc.exe`. Nothing needs
+   installing: no Visual C++ runtime, no DirectX files.
 
 **Two laptops, no network at all:** connect them with an ordinary Ethernet cable, pair them as
 in use case 3, and type the addresses shown. They'll start with `169.254.` after about thirty
@@ -280,13 +292,67 @@ out wrong.
 **Who and where:** you've found or trained a better Whisper model for your language or
 dialect, or want to try a different translator.
 
-**A different Whisper model** (from Hugging Face, or tuned yourself): use the separate
-[model-converter](https://github.com/Cvio/model-converter) project. It turns a Hugging Face
-Whisper model into a folder cnverc can use, checks the conversion, and installs it. Then
-compare it with the stock one (use case 8) before switching.
+**How:** [MODELS.md → How to add a model](MODELS.md#6-how-to-add-a-model) has a recipe for
+each kind: a voice, a Whisper model (through the separate
+[model-converter](https://github.com/Cvio/model-converter) project), a translator, a language
+and a dialect.
 
-**A different translator:** `models\mt\` must hold exactly one Qwen3 `.gguf` file. Move the
-current one somewhere safe, put the new one in, and restart cnverc. Keep the old file, so you
-can switch back.
+**Then check it's actually better:** compare the new recognizer with the old one on your own
+voice (use case 8) before switching. Keep the old translator file, so you can switch back.
 
 **Tuning for a dialect:** see [DIALECTS.md](DIALECTS.md) and [lora.md](lora.md).
+
+---
+
+## When something goes wrong
+
+**First, run the check:** `./check-setup.sh` finds most setup problems and says how to fix
+them.
+
+| What you see | What to do |
+|---|---|
+| `check-setup.sh` says `MISSING` | Do what the line under it says, then run the check again |
+| "This folder's path is too long for the build" | Move the `cnverc` folder somewhere short, such as `C:\cnverc`, and run `./setup.sh` there |
+| `setup.sh` says cnverc is running | Close the cnverc window, then run `./setup.sh` again |
+| A download failed | Run `./setup.sh` again; it retries only what's missing |
+| `Access is denied (os error 5)` while building | cnverc is still running. Close it and build again |
+| The build fails mentioning `libclang` or `clang` | Install LLVM (README, Windows step 3) and open a new Git Bash |
+| The window doesn't open | Run cnverc from Git Bash and read the last lines it prints. Include them if you ask for help |
+| **Linux:** `free(): invalid pointer` when starting | The speech library was built wrongly. Run `./build-sherpa-linux.sh --rebuild`, then `./setup.sh` |
+| **Linux:** `ALSA lib … Unknown PCM` lines | Harmless; ignore them. If no microphone is listed at all: `sudo apt install libasound2-plugins` |
+| No microphone or speakers listed | Plug them in and click **Rescan models and devices** |
+| The level meter doesn't move when you talk | The wrong microphone is chosen, or it's muted in Windows' sound settings |
+| "Nothing recognised in … ms of speech" | The microphone heard sound but no words. Speak closer, or choose another microphone |
+| The first word goes missing | Pause for a moment after pressing the key, before you speak |
+| cnverc translates its own voice | Tick **Mute the microphone while speaking**, or use a headset |
+| "No voice installed for …" | Run `./setup.sh` again; it downloads missing voices |
+| The voice has the wrong accent | Pick the right **Variety** under the language, or choose the voice in Shared mode's voice picker |
+| "Not translated: …" | cnverc refused a translation it didn't trust. Say it again, more simply |
+| Shared machine: a key does nothing | Read that person's column: it says why. If blank, click outside any text box |
+| Shared machine: a column shows a problem with its recognizer | Set that column's **Heard by** to *Whisper large-v3-turbo* |
+| Paired: "Nothing is listening at …" | On the other PC, tick **Pair with another PC**, press **Start**, and check the address |
+| Paired: "No answer from … within 4 s" | A firewall is blocking. On the PC not being reached: **Settings › Network & internet**, choose the network, set **Network profile type** to **Private** |
+| Paired: "There is no route to …" | The PCs aren't on the same network, or the address is mistyped |
+| Paired: refused because of a protocol version | The two PCs run different versions of cnverc. Update both (README, "Updating") |
+| A sentence comes out wrong | See [use case 8](#8-which-recognizer-hears-me-best-and-why-was-that-wrong) |
+
+Asking for help? Include what you did, what you saw, and the newest file in
+`target/release/logs/`.
+
+---
+
+## Words used in cnverc
+
+| Word | Meaning |
+|---|---|
+| **Recognizer** | The model that turns speech into text. cnverc comes with two: Whisper and Parakeet. See [MODELS.md](MODELS.md) |
+| **Translator** | The model that translates the text (Qwen3) |
+| **Voice** | The model that speaks the translation aloud (Piper voices) |
+| **Variety** | A regional form of a language, such as Spanish (Mexico). Optional; see [MODELS.md](MODELS.md#dialects-varieties-in-plain-words) |
+| **Turn** | One stretch of talking, from pressing your key to pressing it again |
+| **Floor** | In paired mode, the right to talk. Only one PC has it at a time |
+| **Mute the microphone while speaking** | Also called half-duplex: the microphone is ignored while cnverc speaks, so it doesn't hear itself |
+| **`cnverc.toml`** | The settings file next to the program. The window saves it for you |
+| **`models/`** | The folder next to the program that holds every model, one folder each |
+| **`engine.toml`** | A small file in each model's folder saying what the model is and which files it uses |
+| **`--report`** | `cnverc --report` lists every model cnverc found, and anything missing |

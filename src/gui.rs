@@ -1344,6 +1344,9 @@ impl App {
     fn recognizer_picker(&mut self, ui: &mut egui::Ui) -> bool {
         let mut changed = false;
         ui.label("Recognizer");
+        if self.config.mode.kind == ModeKind::Shared {
+            ui.weak("In Shared machine mode each person has their own, above their column;                      this one is used for a side left on \"best match\" when it fits.");
+        }
         let current = self
             .selected_recognizer()
             .map(|e| e.name.clone())
@@ -1686,6 +1689,24 @@ impl App {
                 .into_iter()
                 .map(|v| (v.dir_name.clone(), v.name.clone()))
                 .collect();
+        // Only recognizers that list this side's language, and what "best
+        // match" would pick right now.
+        let engines = self.asr_engines();
+        let recognizers: Vec<(String, String)> =
+            shared::recognizers_for(side.language(&self.config.shared), &engines)
+                .into_iter()
+                .map(|e| (e.dir_name.clone(), e.name.clone()))
+                .collect();
+        let best = {
+            let mut unset = self.config.shared.clone();
+            match side {
+                Side::Left => unset.left_asr.clear(),
+                Side::Right => unset.right_asr.clear(),
+            }
+            shared::recognizer_for(side, &unset, &engines, &self.config.asr.engine)
+                .map(|e| e.name.clone())
+                .unwrap_or_else(|_| "none installed".to_string())
+        };
         let mut changed = false;
         let title = match side {
             Side::Left => "Left person",
@@ -1693,14 +1714,16 @@ impl App {
         };
         ui.label(RichText::new(title).strong());
 
-        let (language, voice) = match side {
+        let (language, voice, asr) = match side {
             Side::Left => (
                 &mut self.config.shared.left_language,
                 &mut self.config.shared.left_voice,
+                &mut self.config.shared.left_asr,
             ),
             Side::Right => (
                 &mut self.config.shared.right_language,
                 &mut self.config.shared.right_voice,
+                &mut self.config.shared.right_asr,
             ),
         };
         egui::ComboBox::from_id_salt(("shared language", side.to_string()))
@@ -1713,6 +1736,36 @@ impl App {
                         .changed();
                 }
             });
+
+        let heard_by = recognizers
+            .iter()
+            .find(|(folder, _)| folder == asr)
+            .map(|(_, name)| format!("Heard by: {name}"))
+            .unwrap_or_else(|| {
+                if asr.is_empty() {
+                    format!("Heard by: best match ({best})")
+                } else {
+                    format!("Heard by: {asr} (not usable for this language)")
+                }
+            });
+        egui::ComboBox::from_id_salt(("shared recognizer", side.to_string()))
+            .width(ui.available_width())
+            .selected_text(heard_by)
+            .show_ui(ui, |ui| {
+                changed |= ui
+                    .selectable_value(asr, String::new(), format!("Best match ({best})"))
+                    .changed();
+                for (folder, name) in &recognizers {
+                    changed |= ui
+                        .selectable_value(asr, folder.clone(), format!("{name} ({folder})"))
+                        .changed();
+                }
+            })
+            .response
+            .on_hover_text(
+                "The recognizer that hears this person. Only recognizers that list this \
+                 person's language are shown.",
+            );
 
         let shown = voices
             .iter()
@@ -1788,16 +1841,20 @@ impl App {
             (format!("Ready - press {key}"), GREEN)
         };
 
-        // Why this side can't take a turn, worked out now so it shows before
-        // anyone presses the key.
-        let refusal = shared::direction(
+        // Why this side can't take a turn, or what to know about it (a voice
+        // that fell back, a recognizer that guesses the language), worked out
+        // now so it shows before anyone presses the key.
+        let refusal = match shared::direction(
             side,
             &self.config.shared,
             &self.asr_engines(),
             &self.config.asr.engine,
             &self.voices,
-        )
-        .err()
+        ) {
+            Err(why) => Some(why),
+            Ok(resolved) if !resolved.warnings.is_empty() => Some(resolved.warnings.join(" ")),
+            Ok(_) => None,
+        }
         .or_else(|| s.side_problems.get(&side).cloned());
 
         egui::Frame::new()
@@ -1837,10 +1894,11 @@ impl App {
                 } else {
                     ui.label(status_text);
                 }
-                for problem in [refusal.as_ref(), self.shared_notes.get(&side)]
-                    .into_iter()
-                    .flatten()
-                {
+                let note = self
+                    .shared_notes
+                    .get(&side)
+                    .filter(|n| Some(*n) != refusal.as_ref());
+                for problem in [refusal.as_ref(), note].into_iter().flatten() {
                     ui.label(
                         RichText::new(problem)
                             .color(Color32::from_rgb(255, 200, 120))

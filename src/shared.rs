@@ -140,7 +140,6 @@ pub fn recognizer_for<'a>(
 }
 
 /// The usable recognizers that list `language`, for a side's picker.
-#[allow(dead_code, reason = "the per-side recognizer picker, Part A3")]
 pub fn recognizers_for<'a>(language: &str, recognizers: &'a [Engine]) -> Vec<&'a Engine> {
     recognizers
         .iter()

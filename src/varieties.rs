@@ -45,6 +45,11 @@ pub const TABLE: &[Variety] = &[
         prompt: "Mexican Spanish",
     },
     Variety {
+        tag: "es-ES",
+        display: "Spanish (Spain)",
+        prompt: "Peninsular Spanish",
+    },
+    Variety {
         tag: "ar",
         display: "Arabic",
         prompt: "Arabic",

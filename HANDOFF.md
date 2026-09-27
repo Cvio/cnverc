@@ -1,9 +1,9 @@
-# Handoff: where cnverc stands, for the next session
+# Handoff: where Volis stands, for the next session
 
 Last updated 2026-09-27. Read this first, then `CLAUDE.md` (the hard constraints, the
 working rules, and which document holds what), then `SPEC.md` (the build specification).
 
-## 1. What cnverc is
+## 1. What Volis is
 
 An offline speech-to-speech translator in Rust. Microphone → Silero VAD → speech recognition
 (Parakeet or Whisper, via sherpa-onnx) → translation (Qwen3 1.7B GGUF, via llama.cpp) → speech
@@ -49,7 +49,7 @@ Things not written down elsewhere:
   `~/Desktop/projects/cnverc`. Build with `-j2`: a fully parallel build ran it out of memory and
   took Claude Code down with it. If ufw is on, paired mode needs `sudo ufw allow 47800/tcp` and
   `sudo ufw allow 47801/udp`.
-- **Not a bug:** a Spanish clip captioned `[en]` and then refused by the echo guard. cnverc
+- **Not a bug:** a Spanish clip captioned `[en]` and then refused by the echo guard. Volis
   doesn't detect language; the clip didn't match the configured source, and the guard caught
   the Spanish-to-Spanish "translation" as designed.
 - **For an agent's shell:** long heredocs in the Bash tool break with "unexpected EOF". Write
@@ -58,7 +58,7 @@ Things not written down elsewhere:
 ## 4. Working with this user
 
 - When they **ask a question, answer it and wait.** Don't run commands or change their
-  `cnverc.toml` unasked; they have said so explicitly.
+  `volis.toml` unasked; they have said so explicitly.
 - They test live and report back. Give them a concrete test to run, then read the logs in
   `logs/` next to the exe.
 - Commit at milestone boundaries, or when asked. Keep `cargo fmt` and
@@ -66,6 +66,13 @@ Things not written down elsewhere:
 - Build in milestone order, and don't start M8 before M7's check passes.
 
 ## 5. Next steps
+
+0. **The rename to Volis (2026-09-27)** is new: program `volis.exe`, settings `volis.toml`, logs
+   `volis.log.<date>`, Rust package `volis`. `setup.sh` renames an existing `cnverc.toml` and
+   removes the old `cnverc.exe`. The GitHub repo is still `Cvio/cnverc`; the README clones it
+   into a `volis` folder. If the user renames the repo, update the two clone lines in README.md.
+   If the rename causes trouble, it is one branch (`rename-volis`) to revert; an install that
+   already ran `setup.sh` would then need `volis.toml` renamed back to `cnverc.toml` by hand.
 
 1. Run the M7.5, M7.6 and M7.7 checks by hand (`SPEC.md` §13): both directions heard in the
    right language with speakers up, the other key dead during a turn, Escape cancelling;
@@ -84,7 +91,7 @@ they're already downloaded (slow, harmless). It should skip them when the instal
 are present, as it does for voices.
 
 Nothing is outstanding from M0–M7. The `[en]`-captioned Spanish clip in section 3 is **not** a
-bug and needs no work: cnverc doesn't detect language, the clip simply didn't match the
+bug and needs no work: Volis doesn't detect language, the clip simply didn't match the
 configured `source`, and the echo guard behaved correctly.
 
 **Closed (M7.7): the voice picker.** Two Spanish voices both declaring `languages = ["es"]`
@@ -115,7 +122,7 @@ itself worked throughout; none of these stop a connection.
 
 2. **"No network connection" is asserted while connected.** The `addresses.is_empty()` branch in
    `gui::peer_panel` prints "No network connection. Plug in a cable or join a network, then
-   Rescan" - and did so with a live pairing shown two lines above it. An empty list means cnverc
+   Rescan" - and did so with a live pairing shown two lines above it. An empty list means Volis
    found no addresses, not that the machine has no network; the wording should say that, and the
    message should be suppressed entirely when `session.peer` is connected. As written it would
    send someone to re-seat a working cable.

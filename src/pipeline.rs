@@ -167,7 +167,7 @@ pub enum PipelineMsg {
     /// Paired mode: a turn was asked for and did not happen, and why. The
     /// microphone stayed closed.
     FloorRefused(String),
-    /// Paired mode: other cnverc PCs heard on the local network.
+    /// Paired mode: other Volis PCs heard on the local network.
     Discovered(Vec<Found>),
     /// Something went wrong. Always shown, never only logged.
     Error(String),
@@ -175,7 +175,7 @@ pub enum PipelineMsg {
     Stopped,
 }
 
-/// What a caller can ask of a run beyond `cnverc.toml`.
+/// What a caller can ask of a run beyond `volis.toml`.
 #[derive(Debug, Clone, Default)]
 pub struct Options {
     /// Write each utterance to `logs/segments/` as a WAV.
@@ -273,7 +273,7 @@ impl Pipeline {
             let stop = stop.clone();
             let peer = peer.clone();
             std::thread::Builder::new()
-                .name("cnverc-pipeline".to_string())
+                .name("volis-pipeline".to_string())
                 .spawn(move || {
                     let speech = Speech {
                         tx: speak_tx,
@@ -505,7 +505,7 @@ fn run(root: &Path, config: &Config, options: &Options, wiring: RunWiring) -> Re
         )?;
         if !config.tts.half_duplex {
             warn!(
-                "[tts].half_duplex is off: cnverc will hear its own speech and transcribe it \
+                "[tts].half_duplex is off: Volis will hear its own speech and transcribe it \
                  unless you are wearing headphones (SPEC §10)"
             );
         }
@@ -1033,7 +1033,7 @@ impl Recognizers {
     }
 }
 
-/// Log how much memory cnverc is using. The models run on the CPU, so this is
+/// Log how much memory Volis is using. The models run on the CPU, so this is
 /// the memory that matters; a second recognizer roughly adds its size.
 fn log_memory(when: &str) {
     match memory_stats::memory_stats() {
@@ -1215,7 +1215,7 @@ fn spawn_translator(
     let (tx, rx) = sync_channel::<ToTranslate>(TRANSLATION_QUEUE);
 
     let thread = std::thread::Builder::new()
-        .name("cnverc-translate".to_string())
+        .name("volis-translate".to_string())
         .spawn(move || {
             while let Ok(job) = rx.recv() {
                 if job.generation < generation.load(Ordering::SeqCst) {
@@ -1324,7 +1324,7 @@ fn spawn_speaker(
     events: Sender<PipelineMsg>,
 ) -> Result<JoinHandle<()>> {
     std::thread::Builder::new()
-        .name("cnverc-speak".to_string())
+        .name("volis-speak".to_string())
         .spawn(move || {
             loop {
                 let job = match rx.recv_timeout(POLL) {
@@ -1826,7 +1826,7 @@ mod tests {
     /// at either end (SPEC §8, Milestone 6's check).
     ///
     /// The sentences are separate recordings, joined with pauses between them.
-    /// The turn is transcribed as cnverc does it, in one pass up to 25 s, and
+    /// The turn is transcribed as Volis does it, in one pass up to 25 s, and
     /// also one sentence at a time; the single pass must not lose what the
     /// sentence-by-sentence pass keeps.
     ///
@@ -1838,15 +1838,15 @@ mod tests {
     /// three-sentence turn of real speech, for the same words.
     ///
     /// ```bash
-    /// CNVERC_TEST_MODELS=/abs/path/models \
-    /// CNVERC_TEST_TURN_WAVS="/abs/a.wav;/abs/b.wav;/abs/c.wav" \
+    /// VOLIS_TEST_MODELS=/abs/path/models \
+    /// VOLIS_TEST_TURN_WAVS="/abs/a.wav;/abs/b.wav;/abs/c.wav" \
     /// cargo test --release -- --ignored --nocapture multi_sentence
     /// ```
     #[test]
     #[ignore = "needs the models and Spanish recordings; see the doc comment"]
     fn a_multi_sentence_turn_is_one_utterance() {
-        let models_root = std::env::var("CNVERC_TEST_MODELS").expect("CNVERC_TEST_MODELS");
-        let wavs = std::env::var("CNVERC_TEST_TURN_WAVS").expect("CNVERC_TEST_TURN_WAVS");
+        let models_root = std::env::var("VOLIS_TEST_MODELS").expect("VOLIS_TEST_MODELS");
+        let wavs = std::env::var("VOLIS_TEST_TURN_WAVS").expect("VOLIS_TEST_TURN_WAVS");
         let root = Path::new(&models_root)
             .parent()
             .expect("parent")
@@ -1939,10 +1939,10 @@ mod tests {
     /// makes this exact and silent, as it did for the half-duplex gate.
     ///
     /// ```bash
-    /// CNVERC_TEST_MODELS=/abs/path/models \
-    /// CNVERC_TEST_WAV_ES=/abs/path/spanish-16k.wav \
-    /// CNVERC_TEST_OUT_DEVICE="CABLE Input (VB-Audio Virtual Cable)" \
-    /// CNVERC_TEST_IN_DEVICE="CABLE Output (VB-Audio Virtual Cable)" \
+    /// VOLIS_TEST_MODELS=/abs/path/models \
+    /// VOLIS_TEST_WAV_ES=/abs/path/spanish-16k.wav \
+    /// VOLIS_TEST_OUT_DEVICE="CABLE Input (VB-Audio Virtual Cable)" \
+    /// VOLIS_TEST_IN_DEVICE="CABLE Output (VB-Audio Virtual Cable)" \
     /// cargo test --release -- --ignored --nocapture closed_between_turns
     /// ```
     #[test]
@@ -1952,10 +1952,10 @@ mod tests {
         use crate::playback::Gate;
         use std::sync::mpsc::channel;
 
-        let models_root = std::env::var("CNVERC_TEST_MODELS").expect("CNVERC_TEST_MODELS");
-        let wav_path = std::env::var("CNVERC_TEST_WAV_ES").expect("CNVERC_TEST_WAV_ES");
-        let out_device = std::env::var("CNVERC_TEST_OUT_DEVICE").expect("CNVERC_TEST_OUT_DEVICE");
-        let in_device = std::env::var("CNVERC_TEST_IN_DEVICE").expect("CNVERC_TEST_IN_DEVICE");
+        let models_root = std::env::var("VOLIS_TEST_MODELS").expect("VOLIS_TEST_MODELS");
+        let wav_path = std::env::var("VOLIS_TEST_WAV_ES").expect("VOLIS_TEST_WAV_ES");
+        let out_device = std::env::var("VOLIS_TEST_OUT_DEVICE").expect("VOLIS_TEST_OUT_DEVICE");
+        let in_device = std::env::var("VOLIS_TEST_IN_DEVICE").expect("VOLIS_TEST_IN_DEVICE");
         let root = Path::new(&models_root)
             .parent()
             .expect("parent")
@@ -2053,15 +2053,15 @@ mod tests {
     /// device is involved, so this runs anywhere the models are installed.
     ///
     /// ```bash
-    /// CNVERC_TEST_MODELS=/abs/path/models \
-    /// CNVERC_TEST_WAV_ES=/abs/path/spanish-16k.wav \
+    /// VOLIS_TEST_MODELS=/abs/path/models \
+    /// VOLIS_TEST_WAV_ES=/abs/path/spanish-16k.wav \
     /// cargo test --release -- --ignored --nocapture end_to_end
     /// ```
     #[test]
     #[ignore = "needs every model and a Spanish recording; see the doc comment"]
     fn end_to_end_on_a_recording() {
-        let models_root = std::env::var("CNVERC_TEST_MODELS").expect("CNVERC_TEST_MODELS");
-        let wav_path = std::env::var("CNVERC_TEST_WAV_ES").expect("CNVERC_TEST_WAV_ES");
+        let models_root = std::env::var("VOLIS_TEST_MODELS").expect("VOLIS_TEST_MODELS");
+        let wav_path = std::env::var("VOLIS_TEST_WAV_ES").expect("VOLIS_TEST_WAV_ES");
         let root = Path::new(&models_root)
             .parent()
             .expect("models/ has a parent")

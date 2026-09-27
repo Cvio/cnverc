@@ -1,4 +1,4 @@
-//! Paired mode (SPEC §9): two cnverc instances on a local network as the two
+//! Paired mode (SPEC §9): two Volis instances on a local network as the two
 //! ends of one conversation.
 //!
 //! Each machine runs its own complete pipeline and sends the other only the
@@ -58,7 +58,7 @@ const WRITE_TIMEOUT: Duration = Duration::from_secs(2);
 /// How often the peer thread wakes with nothing to do, for the timers.
 const TICK: Duration = Duration::from_millis(100);
 
-/// What the rest of cnverc can ask of the peer thread.
+/// What the rest of Volis can ask of the peer thread.
 #[derive(Debug, Clone, PartialEq)]
 pub enum PeerCmd {
     Connect(SocketAddr),
@@ -153,7 +153,7 @@ pub fn display_name(configured: &str) -> String {
         .take(MAX_NAME)
         .collect();
     if name.is_empty() {
-        "cnverc".to_string()
+        "Volis".to_string()
     } else {
         name
     }
@@ -181,7 +181,7 @@ pub struct Wiring {
 
 /// Start listening, and the thread that runs paired mode. Returns at once; a
 /// port that cannot be opened is reported as [`PeerState::Unavailable`], not
-/// as an error, so the rest of cnverc still runs.
+/// as an error, so the rest of Volis still runs.
 pub fn start(
     config: &Config,
     stop: Arc<AtomicBool>,
@@ -195,7 +195,7 @@ pub fn start(
 
     let handle = PeerHandle { tx: tx.clone() };
     let thread = std::thread::Builder::new()
-        .name("cnverc-peer".to_string())
+        .name("volis-peer".to_string())
         .spawn(move || {
             let mut peer = Peer::new(me, mode, wiring, tx.clone());
             let helpers = peer.listen(&listen_addr, discovery_on, &stop, &tx);
@@ -327,7 +327,7 @@ impl Peer {
             .and_then(|addr| {
                 TcpListener::bind(addr).with_context(|| {
                     format!(
-                        "cannot listen on {addr}. Is another cnverc already running on this PC? \
+                        "cannot listen on {addr}. Is another Volis already running on this PC? \
                          Two on one PC need different [peer].listen_addr ports"
                     )
                 })
@@ -455,7 +455,7 @@ impl Peer {
                 self.state(PeerState::Connecting(addr));
                 let tx = self.tx.clone();
                 let spawned = std::thread::Builder::new()
-                    .name("cnverc-dial".to_string())
+                    .name("volis-dial".to_string())
                     .spawn(move || {
                         let result = TcpStream::connect_timeout(&addr, CONNECT_TIMEOUT);
                         let _ = tx.send(Input::Dialled(addr, result));
@@ -764,7 +764,7 @@ impl Peer {
             self.close(
                 id,
                 Some("no Hello".to_string()),
-                format!("{addr} connected but never said who it was; is it cnverc?"),
+                format!("{addr} connected but never said who it was; is it Volis?"),
             );
         }
         for id in ping {
@@ -918,7 +918,7 @@ impl Peer {
         for id in ids {
             if let Some(link) = self.links.iter_mut().find(|l| l.id == id) {
                 let _ = link.write(&Wire::Bye {
-                    reason: Some("cnverc was stopped".to_string()),
+                    reason: Some("Volis was stopped".to_string()),
                 });
                 let _ = link.stream.shutdown(Shutdown::Both);
             }
@@ -937,7 +937,7 @@ fn spawn_acceptor(
         .set_nonblocking(true)
         .context("cannot make the listener non-blocking")?;
     std::thread::Builder::new()
-        .name("cnverc-accept".to_string())
+        .name("volis-accept".to_string())
         .spawn(move || {
             while !stop.load(Ordering::Relaxed) {
                 match listener.accept() {
@@ -968,7 +968,7 @@ fn spawn_reader(id: u64, stream: TcpStream, tx: Sender<Input>) -> Result<JoinHan
         .set_read_timeout(Some(DEAD_AFTER))
         .context("cannot set a read timeout")?;
     std::thread::Builder::new()
-        .name("cnverc-peer-read".to_string())
+        .name("volis-peer-read".to_string())
         .spawn(move || {
             let mut reader = BufReader::new(stream);
             let mut line = Vec::with_capacity(512);
@@ -1019,7 +1019,7 @@ fn spawn_reader(id: u64, stream: TcpStream, tx: Sender<Input>) -> Result<JoinHan
 fn diagnose(error: &std::io::Error, addr: SocketAddr, ever_accepted: bool, port: u16) -> String {
     match error.kind() {
         ErrorKind::ConnectionRefused => format!(
-            "Nothing is listening at {addr}. On that PC, is cnverc running with \"Pair with \
+            "Nothing is listening at {addr}. On that PC, is Volis running with \"Pair with \
              another PC\" ticked and Start pressed? Is {} the port it shows?",
             addr.port()
         ),
@@ -1030,7 +1030,7 @@ fn diagnose(error: &std::io::Error, addr: SocketAddr, ever_accepted: bool, port:
                  router makes a network Windows cannot identify, and it usually calls it \
                  Public, which blocks incoming connections. On the other PC, open Settings › \
                  Network & internet, choose this network's adapter, and set its network \
-                 profile to Private, or allow cnverc through Windows Defender Firewall. On \
+                 profile to Private, or allow Volis through Windows Defender Firewall. On \
                  Linux, allow TCP port {} (ufw allow {}/tcp).",
                 CONNECT_TIMEOUT.as_secs(),
                 addr.port(),

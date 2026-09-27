@@ -1,9 +1,9 @@
-//! Finding other cnverc PCs on the local link (SPEC §9), so the peer panel
+//! Finding other Volis PCs on the local link (SPEC §9), so the peer panel
 //! can offer a pick-list instead of making someone type an address.
 //!
 //! Convenience only. Managed switches and VLANs drop broadcast, so typing the
 //! address must always work and nothing depends on this. It uses a UDP
-//! broadcast on port 47801: every couple of seconds each cnverc announces its
+//! broadcast on port 47801: every couple of seconds each Volis announces its
 //! name and port to every local network it is on, and listens for the others.
 //! Broadcast never leaves the local link, needs no router, no DHCP and no DNS,
 //! and works on a bare cable.
@@ -33,7 +33,7 @@ const FORGET_AFTER: Duration = Duration::from_secs(7);
 /// The largest announcement accepted. Real ones are under 150 bytes.
 const MAX_PACKET: usize = 512;
 
-/// Another cnverc, heard on the local network.
+/// Another Volis, heard on the local network.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Found {
     pub name: String,
@@ -82,7 +82,7 @@ pub fn start(
     info!("discovery: announcing \"{name}\" on UDP port {PORT}");
 
     let thread = std::thread::Builder::new()
-        .name("cnverc-discovery".to_string())
+        .name("volis-discovery".to_string())
         .spawn(move || {
             let mut seen: BTreeMap<SocketAddr, (String, Instant)> = BTreeMap::new();
             let mut last_announce: Option<Instant> = None;

@@ -1,4 +1,4 @@
-# cnverc configuration. User selections only; models are referenced by the
+# Volis configuration. User selections only; models are referenced by the
 # name of their directory under models/.
 
 [asr]

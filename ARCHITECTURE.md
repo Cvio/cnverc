@@ -1,9 +1,9 @@
-# How cnverc is built
+# How Volis is built
 
 A guide for a developer who is new to this code. It explains what each part does, how the parts
 connect, how to find the cause of a problem, and how to make the common kinds of change.
 
-- To set cnverc up or use it, read [README.md](README.md) and [USE-CASES.md](USE-CASES.md).
+- To set Volis up or use it, read [README.md](README.md) and [USE-CASES.md](USE-CASES.md).
 - For the models (what each does, `engine.toml`, how to add one), read [MODELS.md](MODELS.md).
 - For *why* things are the way they are (design decisions, build internals, measurements), read
   [TECHNICAL.md](TECHNICAL.md).
@@ -17,7 +17,7 @@ channels between threads, with no async and no macros of our own.
 
 ## 1. The big picture
 
-cnverc is one program with no helpers and no servers. It listens to a microphone, works out
+Volis is one program with no helpers and no servers. It listens to a microphone, works out
 what was said, translates it, and says the translation out loud, all on the local machine:
 
 ```mermaid
@@ -190,7 +190,7 @@ and dialects came later ([docs/plans/dialect-per-side.md](docs/plans/dialect-per
 
 ### Paired mode, in depth
 
-Two cnverc instances as the two ends of one conversation (SPEC §9).
+Two Volis instances as the two ends of one conversation (SPEC §9).
 
 - **What crosses the wire.** Text only: `wire.rs` is newline-delimited JSON over TCP, the
   messages in SPEC §9, so a connection can be faked with netcat. Each PC runs its whole
@@ -246,25 +246,25 @@ break something if you change them without care.
 
 **`main.rs`:** where the program starts.
 - Reads the command line (`cli.rs`), finds the program's folder (`paths::app_root`), starts
-  logging, loads `cnverc.toml`, and hands over to the window, `--listen`, `--report` or
+  logging, loads `volis.toml`, and hands over to the window, `--listen`, `--report` or
   `--devices`.
 - Also holds `print_devices` and `init_logging`, which writes to `logs/` next to the program.
 
 **`cli.rs`:** turns command-line arguments into a `Command`. It's small on purpose; the
 controls belong in the window.
 
-**`paths.rs`:** every path cnverc uses, all built from `app_root()`, the folder the program is
+**`paths.rs`:** every path Volis uses, all built from `app_root()`, the folder the program is
 in.
 - **Rule:** never use the working directory, `%APPDATA%`, `~/.cache`, or a `dirs` crate.
-  cnverc must run from any folder it's copied to (SPEC §2.4).
+  Volis must run from any folder it's copied to (SPEC §2.4).
 
-**`config.rs`:** `cnverc.toml`.
+**`config.rs`:** `volis.toml`.
 - `Config::load` reads it. Every section has defaults, so an older file still loads.
 - `Config::save_selections` writes the window's choices back with `toml_edit`, keeping the
   user's comments and layout.
 - **Rule:** every struct uses `deny_unknown_fields`, so a misspelt key is an error rather than
   silently ignored. A new key must be declared, with a default. See
-  [section 6](#add-a-cnverctoml-setting).
+  [section 6](#add-a-volistoml-setting).
 
 **`models.rs`:** model discovery ("the filesystem is the index"; the user's view is in
 [MODELS.md](MODELS.md)).
@@ -278,7 +278,7 @@ in.
   no "first match wins" anywhere.
 - **Rule:** model files keep their published names. `engine.toml` says which file is which.
 
-**`varieties.rs`:** the table of every language and variety cnverc knows: a BCP 47 tag, the
+**`varieties.rs`:** the table of every language and variety Volis knows: a BCP 47 tag, the
 name the window shows, and the name written into the translation prompt.
 - `lookup`, `require` (an error naming the unknown tag), `language_of` (`es-MX` → `es`),
   `varieties_of`, `display_name`.
@@ -345,8 +345,8 @@ process.
 
 **`playback.rs`:** the speakers, and the **half-duplex gate**.
 - `Player` plays queued samples.
-- The `Gate` closes while cnverc is speaking and for 150 ms afterwards. While it's closed, the
-  pipeline throws away microphone audio, so cnverc never hears and re-translates its own voice.
+- The `Gate` closes while Volis is speaking and for 150 ms afterwards. While it's closed, the
+  pipeline throws away microphone audio, so Volis never hears and re-translates its own voice.
 - `PlaybackControl` lets the pipeline cut a reply off when someone takes a turn
   (`begin_turn`), release held replies (`end_turn`), or stop everything (`stop`, used by
   Escape).
@@ -409,14 +409,14 @@ Typing the address always works without it.
 
 ---
 
-## 4. Rules that keep cnverc working
+## 4. Rules that keep Volis working
 
 These come from SPEC §2 and from problems that were found and fixed. Each is cheap to keep and
 expensive to break.
 
 | Rule | Why |
 |---|---|
-| **No internet, ever.** No downloads, update checks or DNS lookups at runtime. | cnverc must work with the network unplugged. Local sockets between two PCs are fine. |
+| **No internet, ever.** No downloads, update checks or DNS lookups at runtime. | Volis must work with the network unplugged. Local sockets between two PCs are fine. |
 | **Paths only from `paths::app_root()`.** | The whole folder can be copied anywhere, including to another PC, and still work. |
 | **Windows: static CRT, and llama.cpp without `openmp`** (`.cargo/config.toml`, `Cargo.toml`). | The program must run on a PC with nothing installed, with no Visual C++ redistributable. |
 | **Linux: sherpa-onnx as a shared library** (a target-specific entry in `Cargo.toml`). | The ready-made static Linux library crashes when a model loads. Keep this Linux-only. |
@@ -431,7 +431,7 @@ expensive to break.
 
 ## 5. Configuration and models
 
-**`cnverc.toml`** sits next to the program and holds only the user's choices: recognizer,
+**`volis.toml`** sits next to the program and holds only the user's choices: recognizer,
 languages, devices, mode, speech, pairing, and the Shared-mode sides.
 - The window saves changes as they're made (`save_selections`), editing the file in place so
   comments survive.
@@ -439,9 +439,9 @@ languages, devices, mode, speech, pairing, and the Shared-mode sides.
 
 **Models** live under `models/`, one folder per model. The folder layout, every `engine.toml`
 key, and how a model is picked are in [MODELS.md](MODELS.md). In code terms:
-- the descriptor is parsed in `models.rs` with `deny_unknown_fields`, as `cnverc.toml` is;
+- the descriptor is parsed in `models.rs` with `deny_unknown_fields`, as `volis.toml` is;
 - `engine.toml` files are committed, and the weights never are (`.gitignore`);
-- `cnverc.toml` names models by their **folder name** (`[asr] engine`, `[shared] left_asr`,
+- `volis.toml` names models by their **folder name** (`[asr] engine`, `[shared] left_asr`,
   `left_voice`), never by display name.
 
 ---
@@ -451,11 +451,11 @@ key, and how a model is picked are in [MODELS.md](MODELS.md). In code terms:
 Adding a voice, a recognizer model, a translator, a language or a dialect is in
 [MODELS.md → How to add a model](MODELS.md#6-how-to-add-a-model). The recipes below need code.
 
-### Add a `cnverc.toml` setting
+### Add a `volis.toml` setting
 
 1. Add the field to the right struct in `config.rs`, with a default in its `impl Default`.
 2. If the window changes it, add a `set(…)` line to `save_selections`.
-3. Add it, commented, to the `cnverc.toml` template in the repository root, and to SPEC §7.
+3. Add it, commented, to the `volis.toml` template in the repository root, and to SPEC §7.
 4. Add a test like `a_file_from_before_shared_mode_still_loads`: an old file must still load.
 
 ### Add a pipeline message and show it
@@ -477,7 +477,7 @@ Adding a voice, a recognizer model, a translator, a language or a dialect is in
 
 ### Change a key
 
-The Space key is `[mode] turn_key` in `cnverc.toml`. The Shared-mode keys are
+The Space key is `[mode] turn_key` in `volis.toml`. The Shared-mode keys are
 `[shared] left_key` and `right_key`. The names are egui's (`ArrowLeft`, `Space`, `F1`, …).
 No code change is needed.
 
@@ -492,23 +492,23 @@ No code change is needed.
 | A model shows DISABLED or broken | `--report`; `models.rs` (which files `engine.toml` names) |
 | No microphone or speaker listed | `--devices`; `audio.rs` |
 | The level meter doesn't move | The wrong input device; the log's "input level" lines, every 5 s |
-| "Nothing recognised" | Play the utterance back with `--listen --wav`; `vad.rs` thresholds in `cnverc.toml` `[vad]` |
+| "Nothing recognised" | Play the utterance back with `--listen --wav`; `vad.rs` thresholds in `volis.toml` `[vad]` |
 | Wrong words | `--compare` to try the other recognizer; for Shared mode, check "transcribing as" in the log |
 | "Not translated: …" | `translate.rs`: which guard refused it, named in the message |
 | No voice | "No voice installed for …" in the settings; `tts::for_language`; the Shared column's warning |
 | The wrong voice or recognizer is picked | `models::rank`, and the model's `varieties` in `engine.toml`; `--report` shows each one's "tuned for" |
-| cnverc translates its own voice | The half-duplex gate: "Mute the microphone while speaking" must be on with speakers (`playback.rs`) |
+| Volis translates its own voice | The half-duplex gate: "Mute the microphone while speaking" must be on with speakers (`playback.rs`) |
 | The window won't open | The log's last lines; on Windows, `gui::graphics_setup` |
 | Pairing problems | The pairing panel's message; `peer.rs` `diagnose`; the log's `paired mode:` lines |
 | A Shared-mode key does nothing | That column's status or reason; `Session::shared_press`; a focused text box |
 
 ### Logs
 
-- Everything is logged to `logs/cnverc.log.<date>` next to the program, and to the console
+- Everything is logged to `logs/volis.log.<date>` next to the program, and to the console
   window.
-- For more detail, start cnverc from a terminal with `RUST_LOG=debug` (Git Bash:
-  `RUST_LOG=debug ./cnverc.exe`), or narrow it to one module, as in
-  `RUST_LOG=info,cnverc::peer=debug`.
+- For more detail, start Volis from a terminal with `RUST_LOG=debug` (Git Bash:
+  `RUST_LOG=debug ./volis.exe`), or narrow it to one module, as in
+  `RUST_LOG=info,volis::peer=debug`.
 - `--listen --wav` also writes each utterance to `logs/segments/`, which is how a misheard
   sentence gets diagnosed.
 - Lines to know:
@@ -519,12 +519,12 @@ No code change is needed.
 
 ### Trying the window without touching your settings
 
-Copy the program into a scratch folder with its own `cnverc.toml` and empty
+Copy the program into a scratch folder with its own `volis.toml` and empty
 `models/{asr,tts,mt,vad}` folders. The window opens, and nothing you change touches your real
 settings. For a full test, point it at the real models with a Windows junction:
 
 ```
-mklink /J <scratch>\models <cnverc>\target\release\models
+mklink /J <scratch>\models <volis>\target\release\models
 ```
 
 Remove it afterwards with `rmdir`, which removes only the link. **Don't** delete the scratch
@@ -543,7 +543,7 @@ Most tests run with `cargo test` and need nothing. The ones marked `#[ignore]` n
 comments:
 
 ```bash
-CNVERC_TEST_VAD_MODEL=/abs/path/silero_vad.onnx CNVERC_TEST_WAV=/abs/path/speech.wav CNVERC_TEST_MODELS=/abs/path/models CNVERC_TEST_WAV_ES=/abs/path/spanish-16k.wav cargo test --release -- --ignored --nocapture
+VOLIS_TEST_VAD_MODEL=/abs/path/silero_vad.onnx VOLIS_TEST_WAV=/abs/path/speech.wav VOLIS_TEST_MODELS=/abs/path/models VOLIS_TEST_WAV_ES=/abs/path/spanish-16k.wav cargo test --release -- --ignored --nocapture
 ```
 
 Add a test name at the end to run one, for example `alternates` or `dialect_pairs`.
@@ -556,20 +556,20 @@ refuses to add a second resampling path. Convert with
 ### Testing without a person talking
 
 - **Windows:** with a virtual audio cable (VB-Audio), play a recording into the cable's input
-  and set cnverc's microphone to its output.
+  and set Volis's microphone to its output.
 - **Linux:** make a clip with a Piper voice and play it through the speakers into a running
   `--listen`:
 
   ```bash
   V=target/release/models/tts/vits-piper-en_US-lessac-medium
   sherpa-onnx-offline-tts --vits-model=$V/en_US-lessac-medium.onnx --vits-tokens=$V/tokens.txt --vits-data-dir=$V/espeak-ng-data --output-filename=en.wav "Where is the train station?"
-  ./target/release/cnverc --listen --seconds 60 &
+  ./target/release/volis --listen --seconds 60 &
   sleep 30; aplay en.wav; wait
   ```
 
   `sherpa-onnx-offline-tts` is in the shared sherpa-onnx build's `bin/`. The models take about
   20 s to load, hence the 30 s wait. The same clip run through `sherpa-onnx-offline` checks
-  sherpa-onnx itself, with no cnverc involved.
+  sherpa-onnx itself, with no Volis involved.
 
 ---
 
@@ -586,14 +586,14 @@ cargo test
 A debug build runs from `target/debug/`, which needs its own models and settings, once:
 
 ```bash
-cp -r models cnverc.toml target/debug/ && ./setup-models.sh target/debug
+cp -r models volis.toml target/debug/ && ./setup-models.sh target/debug
 ```
 
 `setup-models.sh` takes the program's folder (default `target/release`), skips what's already
 there, and is the only place the model download URLs are written down.
 
 - Windows needs the Build Tools' CMake on PATH for a plain `cargo build` (`setup.sh` finds it).
-  Close cnverc before rebuilding: a running program can't be replaced ("Access is denied").
+  Close Volis before rebuilding: a running program can't be replaced ("Access is denied").
 - On Linux, set `SHERPA_ONNX_LIB_DIR` to the library `build-sherpa-linux.sh` built (it prints
   the path), and use `-j2` on smaller machines.
 

@@ -57,7 +57,7 @@ fn backend() -> Result<&'static LlamaBackend> {
     BACKEND
         .get_or_init(|| {
             // llama.cpp narrates model loading to stderr in great detail;
-            // cnverc has its own log and does not need it twice.
+            // Volis has its own log and does not need it twice.
             llama_cpp_2::send_logs_to_tracing(
                 llama_cpp_2::LogOptions::default().with_logs_enabled(false),
             );
@@ -80,7 +80,7 @@ impl LlamaTranslator {
     pub fn load(path: &Path) -> Result<Self> {
         if !path.is_file() {
             return Err(anyhow!(
-                "translation model not found: {}\ncnverc never downloads models; place the \
+                "translation model not found: {}\nVolis never downloads models; place the \
                  GGUF at that exact path (see README.md) and run again.",
                 path.display()
             ));
@@ -275,7 +275,7 @@ Write it the way {article} {target_name} speaker would say it aloud, using      
 /// announce "a question is translated as a question, an instruction is
 /// translated as an instruction" through the speakers.
 ///
-/// The check is exact rather than clever. cnverc wrote the prompt, so it can
+/// The check is exact rather than clever. Volis wrote the prompt, so it can
 /// recognise any run of it coming back.
 fn leaks_the_prompt(output: &str, source: &str, target: &str) -> bool {
     const MIN_WORDS: usize = 4;
@@ -512,12 +512,12 @@ mod tests {
     /// is asserted about the wording.
     ///
     /// ```bash
-    /// CNVERC_TEST_GGUF=/abs/path/model.gguf     /// cargo test --release -- --ignored --nocapture dialect_pairs
+    /// VOLIS_TEST_GGUF=/abs/path/model.gguf     /// cargo test --release -- --ignored --nocapture dialect_pairs
     /// ```
     #[test]
     #[ignore = "needs a translation GGUF; see the doc comment"]
     fn dialect_pairs() {
-        let path = std::env::var("CNVERC_TEST_GGUF").expect("CNVERC_TEST_GGUF");
+        let path = std::env::var("VOLIS_TEST_GGUF").expect("VOLIS_TEST_GGUF");
         let mut translator = LlamaTranslator::load(Path::new(&path)).expect("load");
         for (text, plain, dialect) in [
             ("Hey man, what's up? Want to grab a bite?", "es", "es-MX"),
@@ -626,12 +626,12 @@ mod tests {
     /// live session speak the system prompt aloud.
     ///
     /// ```bash
-    /// CNVERC_TEST_GGUF=/abs/path/qwen3-0.6b-q4_k_m.gguf     /// cargo test --release -- --ignored --nocapture guards_
+    /// VOLIS_TEST_GGUF=/abs/path/qwen3-0.6b-q4_k_m.gguf     /// cargo test --release -- --ignored --nocapture guards_
     /// ```
     #[test]
     #[ignore = "needs the translation GGUF; see the doc comment"]
     fn guards_reject_what_is_not_a_translation() {
-        let path = std::env::var("CNVERC_TEST_GGUF").expect("CNVERC_TEST_GGUF");
+        let path = std::env::var("VOLIS_TEST_GGUF").expect("VOLIS_TEST_GGUF");
         let mut translator = LlamaTranslator::load(Path::new(&path)).expect("load");
 
         // Nonsense: whatever comes back must not reach a caption or a speaker.
@@ -696,13 +696,13 @@ mod tests {
     /// a translation is right is read from the output.
     ///
     /// ```bash
-    /// CNVERC_TEST_GGUF=/abs/path/model.gguf \
+    /// VOLIS_TEST_GGUF=/abs/path/model.gguf \
     /// cargo test --release -- --ignored --nocapture bench_both_directions
     /// ```
     #[test]
     #[ignore = "needs a translation GGUF; see the doc comment"]
     fn bench_both_directions() {
-        let path = std::env::var("CNVERC_TEST_GGUF").expect("CNVERC_TEST_GGUF");
+        let path = std::env::var("VOLIS_TEST_GGUF").expect("VOLIS_TEST_GGUF");
         let mut translator = LlamaTranslator::load(Path::new(&path)).expect("load");
         println!("model: {path}");
 
@@ -750,13 +750,13 @@ mod tests {
     /// instead of translating:
     ///
     /// ```bash
-    /// CNVERC_TEST_GGUF=/abs/path/qwen3-0.6b-q4_k_m.gguf \
+    /// VOLIS_TEST_GGUF=/abs/path/qwen3-0.6b-q4_k_m.gguf \
     /// cargo test --release -- --ignored --nocapture translates_
     /// ```
     #[test]
     #[ignore = "needs the translation GGUF; see the doc comment"]
     fn translates_spanish_to_english_without_answering() {
-        let path = std::env::var("CNVERC_TEST_GGUF").expect("CNVERC_TEST_GGUF");
+        let path = std::env::var("VOLIS_TEST_GGUF").expect("VOLIS_TEST_GGUF");
         let mut translator = LlamaTranslator::load(Path::new(&path)).expect("load");
 
         let cases = [

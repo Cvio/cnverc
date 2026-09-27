@@ -1,4 +1,4 @@
-# Getting a dialect working in cnverc
+# Getting a dialect working in Volis
 
 As of 2026-09-21. A living copy of this guide is kept as a Claude Doc; this file is the
 repository's snapshot, for anyone (or any Claude Code session) working on dialect support.
@@ -6,7 +6,7 @@ repository's snapshot, for anyone (or any Claude Code session) working on dialec
 ## Bottom line
 
 Tune the recognizer first, and only if a measured baseline says it needs it. Dialect lives at
-three stages of cnverc, and they differ in payoff, in the data they need, and in how hard the
+three stages of Volis, and they differ in payoff, in the data they need, and in how hard the
 result is to get back into the app.
 
 | Stage | What dialect breaks | Payoff from tuning | Data it needs | Model to tune |
@@ -31,10 +31,10 @@ worse more often than people expect.
 - **Split by speaker, not by clip.** If the same person is in both training and test, the score
   measures memorised voice, not dialect.
 - **Two references per utterance:** the correct transcript, and a correct English translation.
-- **Real conditions:** record some through the microphone cnverc will actually use. Clean studio
+- **Real conditions:** record some through the microphone Volis will actually use. Clean studio
   audio flatters every model.
 
-Then score what you already have. `cnverc --listen --compare --wav` runs both installed
+Then score what you already have. `volis --listen --compare --wav` runs both installed
 recognizers on the same audio and saves each utterance. Word error rate is the recognizer's
 number; for translation, a fixed set of 20–50 sentences judged by a fluent speaker is more honest
 than any automatic score at this scale.
@@ -68,7 +68,7 @@ produces - not polished written text.
 
 ## Recognition: tune Whisper large-v3-turbo
 
-Tune `openai/whisper-large-v3-turbo`, the model cnverc already runs, with LoRA. Tuning a smaller
+Tune `openai/whisper-large-v3-turbo`, the model Volis already runs, with LoRA. Tuning a smaller
 Whisper is easier, but it throws away most of the capacity you are trying to adapt; a small model
 that knows the dialect often loses to a large one that half-knows it.
 
@@ -92,7 +92,7 @@ Others who have done it report the same four steps:
 3. Run sherpa-onnx's `scripts/whisper/export-onnx.py`, adapted to accept a local checkpoint; as
    shipped it downloads named models and does not support new ones.
 4. Quantize to int8, giving `encoder.int8.onnx`, `decoder.int8.onnx` and `tokens.txt` - the three
-   files cnverc's `engine.toml` expects.
+   files Volis's `engine.toml` expects.
 
 One trap: on PyTorch 2.9 or later the export needs `dynamo=False` passed to `torch.onnx.export`,
 because the newer exporter fails on Whisper's positional-embedding indexing.
@@ -115,11 +115,11 @@ may be all you need. For Iraqi Arabic it probably is not - a 1.7B model's grip o
 dialect is weak, and dialect *input* is harder than dialect output.
 
 **If the prompt falls short, tune `Qwen/Qwen3-1.7B` with LoRA.** It must stay a Qwen3 model:
-cnverc checks for one, because it relies on Qwen3's chat format and how it handles the thinking
+Volis checks for one, because it relies on Qwen3's chat format and how it handles the thinking
 block. On a 5090, a 1.7B model trains with LoRA in full precision; there is no need for 4-bit
 tricks.
 
-You cannot train the file cnverc uses. `qwen3-1.7b-q4_k_m.gguf` is a compressed inference copy;
+You cannot train the file Volis uses. `qwen3-1.7b-q4_k_m.gguf` is a compressed inference copy;
 training happens on the full-precision weights. The round trip is:
 
 1. Train LoRA on the Hugging Face model.
@@ -140,7 +140,7 @@ model's translations with a fluent speaker first; you are teaching its mistakes 
 ## Speech: usually skip it
 
 Leave the voice until last, and probably leave it alone. A voice in the wrong accent is
-understood; a recognizer that mishears is not. Tuning speech improves how cnverc sounds, not
+understood; a recognizer that mishears is not. Tuning speech improves how Volis sounds, not
 whether it works.
 
 Check what exists before training anything. Piper's only Arabic voice is Jordanian
@@ -184,11 +184,11 @@ later. Older PyTorch wheels install fine and then fail on the card, so check
 `torch.cuda.is_available()` and run a tiny training step before starting a real run.
 
 `ubox` and the 4070 laptop are not needed for any of this. The trained models become ordinary
-files in `models/`, and run on whatever machine cnverc runs on.
+files in `models/`, and run on whatever machine Volis runs on.
 
-## How cnverc handles dialects (varieties)
+## How Volis handles dialects (varieties)
 
-Built in M7.7. What a variety is, how models declare one in `engine.toml`, how cnverc ranks
+Built in M7.7. What a variety is, how models declare one in `engine.toml`, how Volis ranks
 models for it, and how to add one are in
 [MODELS.md → Dialects](MODELS.md#dialects-varieties-in-plain-words) and
 [MODELS.md → Add a dialect](MODELS.md#add-a-dialect). The code is described in
@@ -223,5 +223,5 @@ the hardest export - so it is worth confirming the baseline is actually poor bef
 pipeline.
 
 The existing Iraqi LoRA adapters on Hugging Face are no shortcut. They are built on
-`whisper-small`, a much weaker base than the model cnverc runs, and their model cards give no
+`whisper-small`, a much weaker base than the model Volis runs, and their model cards give no
 data, test set or error rate to judge them by.

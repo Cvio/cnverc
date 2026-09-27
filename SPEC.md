@@ -1,5 +1,9 @@
 # SPEC.md - `cnverc`
 
+> **Renamed on 2026-09-27: cnverc is now Volis.** The program is `volis.exe`, the settings file
+> `volis.toml`, the Rust package `volis`. This specification keeps the old name as written;
+> read `cnverc` as Volis throughout.
+
 **Read this entire file before writing any code.** This is a build specification, not a
 suggestion list. The constraints in §2 are the reason the project exists; violating one of
 them makes the deliverable worthless even if it compiles and runs.

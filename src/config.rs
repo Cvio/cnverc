@@ -126,6 +126,11 @@ pub struct Shared {
     pub right_voice: String,
     pub left_key: String,
     pub right_key: String,
+    /// The recognizer that hears the LEFT person: a folder name under
+    /// models/asr/. Empty = the best installed match for their language.
+    pub left_asr: String,
+    /// The recognizer that hears the RIGHT person.
+    pub right_asr: String,
 }
 
 impl Default for Shared {
@@ -137,6 +142,8 @@ impl Default for Shared {
             right_voice: String::new(),
             left_key: "ArrowLeft".to_string(),
             right_key: "ArrowRight".to_string(),
+            left_asr: String::new(),
+            right_asr: String::new(),
         }
     }
 }
@@ -297,6 +304,18 @@ impl Config {
             "left_voice",
             self.shared.left_voice.as_str(),
             VOICE_NOTE_LEFT,
+        );
+        set(
+            &mut doc,
+            "shared",
+            "left_asr",
+            self.shared.left_asr.as_str(),
+        );
+        set(
+            &mut doc,
+            "shared",
+            "right_asr",
+            self.shared.right_asr.as_str(),
         );
         set_explained(
             &mut doc,
@@ -490,6 +509,30 @@ discovery = true
         let config: Config = toml::from_str(SPEC_EXAMPLE).expect("the M7 file must load");
         assert_eq!(config.shared, Shared::default());
         assert_eq!(config.shared.left_key, "ArrowLeft");
+    }
+
+    #[test]
+    fn per_side_recognizers_load_and_default_to_empty() {
+        // A [shared] section from before per-side recognizers.
+        let old: Config = toml::from_str(
+            "[shared]
+left_language = \"en\"
+",
+        )
+        .expect("loads");
+        assert_eq!(
+            (old.shared.left_asr.as_str(), old.shared.right_asr.as_str()),
+            ("", "")
+        );
+        let new: Config = toml::from_str(
+            "[shared]
+left_asr = \"parakeet-tdt-0.6b-v3-int8\"
+right_asr = \"whisper-es\"
+",
+        )
+        .expect("loads");
+        assert_eq!(new.shared.left_asr, "parakeet-tdt-0.6b-v3-int8");
+        assert_eq!(new.shared.right_asr, "whisper-es");
     }
 
     #[test]

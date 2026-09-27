@@ -44,3 +44,6 @@ left_voice = ""
 right_voice = ""
 left_key = "ArrowLeft"
 right_key = "ArrowRight"
+# The recognizer that hears each side: a folder under models/asr/; empty = best match.
+left_asr = ""
+right_asr = ""

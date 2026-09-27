@@ -35,6 +35,15 @@ cmake_dir() {
   [ -n "$found" ] && dirname "$(cygpath -u "$found")"
 }
 
+# have_lib NAME: is a shared library NAME.so* known to the loader, or present
+# in a usual folder? (Not `ls a b`: that fails if any one pattern matches
+# nothing, even when another does.)
+have_lib() {
+  ldconfig -p 2>/dev/null | grep -q "/$1\.so" && return 0
+  compgen -G "/usr/lib/$1.so*" >/dev/null || compgen -G "/usr/lib/*/$1.so*" >/dev/null ||
+    compgen -G "/usr/lib/llvm-*/lib/$1.so*" >/dev/null
+}
+
 echo "Checking what cnverc needs to build ($os)"
 echo
 
@@ -135,13 +144,13 @@ if [ "$os" = linux ]; then
     bad "ALSA sound headers" "$apt_line"
   fi
 
-  if ls /usr/lib/*/libclang*.so* /usr/lib/llvm-*/lib/libclang*.so* >/dev/null 2>&1; then
+  if have_lib libclang || compgen -G "/usr/lib/llvm-*/lib/libclang-*.so*" >/dev/null; then
     ok "libclang"
   else
     bad "libclang" "$apt_line"
   fi
 
-  if ls /usr/lib/*/libonnxruntime.so* /usr/lib/libonnxruntime.so* >/dev/null 2>&1; then
+  if have_lib libonnxruntime; then
     ok "onnxruntime (system package)"
   else
     bad "onnxruntime" "$apt_line   (Ubuntu 25.04 or later packages it)"

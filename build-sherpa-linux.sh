@@ -35,7 +35,7 @@ apt_line="sudo apt install git cmake build-essential libonnxruntime-dev"
 for tool in git cmake c++; do
   command -v "$tool" >/dev/null 2>&1 || stop "$tool is not installed." "$apt_line"
 done
-ls /usr/lib/*/libonnxruntime.so* /usr/lib/libonnxruntime.so* >/dev/null 2>&1 ||
+{ ldconfig -p 2>/dev/null | grep -q "/libonnxruntime\.so" || compgen -G "/usr/lib/*/libonnxruntime.so*" >/dev/null; } ||
   stop "The system onnxruntime isn't installed; building without it produces a library that crashes." \
        "$apt_line   (Ubuntu 25.04 or later packages it)"
 

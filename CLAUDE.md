@@ -59,7 +59,8 @@ loses. If you believe one of these is wrong, stop and say so rather than working
 
 ## Status
 
-Milestones 0–7 complete. M7.5 (shared-machine mode) is built; its check by hand is pending.
+Milestones 0–7 complete. M7.5 (shared-machine mode), M7.6 (a recognizer per shared-machine
+side) and M7.7 (varieties/dialects) are built; their checks by hand are pending.
 M8 (streaming ASR) has not started.
 
 - M0: skeleton, path resolution, config load, model discovery, report.
@@ -106,6 +107,12 @@ M8 (streaming ASR) has not started.
   Parakeet ignores the language it's told. `WhisperAsr` keeps a recognizer per language, so
   alternating languages never reloads the model. Escape cancels via a generation counter.
   Shared and paired mode exclude each other.
+
+- M7.6/M7.7 (built, checks pending): each shared-machine side has its own recognizer
+  (`[shared].left_asr`/`right_asr`). Languages may be BCP 47 varieties from
+  `src/varieties.rs`; `engine.toml` may declare `varieties`; `models::rank` orders models tuned,
+  general, other-variety and replaces "first match wins". Whisper is only ever told the
+  language part. The translation prompt names the variety. Wire protocol is version 2.
 
 Linux (the user's `ubox`) builds and runs the full pipeline since 2026-09-19, using the shared
 sherpa-onnx build described under "Build note". Build there with `-j2`: a fully parallel

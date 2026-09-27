@@ -1,20 +1,19 @@
 //! Shared-machine mode (M7.5): two people who speak different languages use
 //! one machine, each with their own key.
 //!
-//! The key says who is talking, and so which language they speak. Nothing is
-//! detected: the language from the key goes to the recognizer, which must be
-//! Whisper, because Whisper is the recognizer that takes a language rather
-//! than guessing one.
+//! The key says who is talking, and so which language they speak. Each side
+//! has its own recognizer, chosen for that side's language, so a model tuned
+//! for one language can hear one person while another hears the other.
 //!
 //! This module is the rule that turns "which side pressed" into a direction:
-//! the language to recognise, the language to translate into, and the voice to
-//! speak it with. It has no window, device or model in it, so every case is
+//! the recognizer and language to hear it with, the language to translate
+//! into, and the voice to speak it with. It has no window, device or model in it, so every case is
 //! tested directly.
 
 use std::fmt;
 
 use crate::config::Shared;
-use crate::models::{AsrBackend, Backend, Engine};
+use crate::models::{AsrBackend, Backend, Engine, Ranked};
 
 /// Which person pressed their key.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -48,6 +47,15 @@ impl Side {
         }
     }
 
+    /// The recognizer configured for this side: a folder name, or empty for
+    /// the best match.
+    pub fn asr(self, settings: &Shared) -> &str {
+        match self {
+            Side::Left => &settings.left_asr,
+            Side::Right => &settings.right_asr,
+        }
+    }
+
     pub fn key(self, settings: &Shared) -> &str {
         match self {
             Side::Left => &settings.left_key,
@@ -69,7 +77,9 @@ impl fmt::Display for Side {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Direction {
     pub side: Side,
-    /// What the speaker is saying, passed to Whisper as its language.
+    /// The recognizer's folder name under `models/asr/`.
+    pub asr: String,
+    /// What the speaker is saying, passed to the recognizer as its language.
     pub source: String,
     /// What it is translated into and spoken in.
     pub target: String,
@@ -82,17 +92,73 @@ pub struct Direction {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Resolved {
     pub direction: Direction,
-    pub warning: Option<String>,
+    /// Things the side's column should show, such as a voice that fell back.
+    pub warnings: Vec<String>,
+}
+
+/// The recognizer that hears one side, or why there is none.
+///
+/// The configured one when set; it must be installed, complete, and list the
+/// side's language, and it is never swapped for another (SPEC §15). When
+/// unset, the best match: `preferred` (the main recognizer) if it covers the
+/// language, otherwise the first usable recognizer that does.
+pub fn recognizer_for<'a>(
+    side: Side,
+    settings: &Shared,
+    recognizers: &'a [Engine],
+    preferred: &str,
+) -> Result<&'a Engine, String> {
+    let language = side.language(settings).trim();
+    let configured = side.asr(settings).trim();
+    if !configured.is_empty() {
+        let engine = recognizers
+            .iter()
+            .find(|e| e.dir_name == configured)
+            .ok_or_else(|| format!("the recognizer \"{configured}\" is not installed"))?;
+        if !engine.enabled() {
+            return Err(format!(
+                "{} is missing files: {}",
+                engine.name,
+                engine.missing_files().join(", ")
+            ));
+        }
+        if !declares(engine, language) {
+            return Err(format!(
+                "{} does not list \"{language}\" among its languages, so it cannot hear this side",
+                engine.name
+            ));
+        }
+        return Ok(engine);
+    }
+    // The best-fitting group (models::rank); within it, the main recognizer
+    // if it is there, so an unset side doesn't load a second model for nothing.
+    let ranked = crate::models::rank(language, recognizers);
+    let best = ranked.first().ok_or_else(|| {
+        format!("no installed recognizer lists \"{language}\" among its languages")
+    })?;
+    Ok(ranked
+        .iter()
+        .take_while(|r| r.fit == best.fit)
+        .find(|r| r.engine.dir_name == preferred)
+        .unwrap_or(best)
+        .engine)
+}
+
+/// The usable recognizers that list `language`, for a side's picker.
+pub fn recognizers_for<'a>(language: &str, recognizers: &'a [Engine]) -> Vec<Ranked<'a>> {
+    crate::models::rank(language, recognizers)
 }
 
 /// Work out where one turn's words go, or why there can be no turn.
 ///
-/// `recognizer` is the selected recognizer, shared by both sides. `voices` is
-/// every discovered voice, broken ones included; only usable ones are chosen.
+/// `recognizers` and `voices` are every discovered model, broken ones
+/// included; only usable ones are chosen. `preferred` is the main
+/// recognizer, the first choice for a side that has none configured.
 pub fn direction(
     side: Side,
     settings: &Shared,
-    recognizer: Option<&Engine>,
+    recognizers: &[Engine],
+    preferred: &str,
     voices: &[Engine],
 ) -> Result<Resolved, String> {
     let source = side.language(settings).trim().to_string();
@@ -100,30 +166,21 @@ pub fn direction(
     if source.is_empty() || target.is_empty() {
         return Err("choose a language for both sides".to_string());
     }
+    // A tag the table doesn't know is refused here, where the column shows it.
+    crate::varieties::require(&source)?;
+    crate::varieties::require(&target)?;
     if source == target {
         return Err(format!(
             "both sides are set to \"{source}\"; choose a different language for each"
         ));
     }
 
-    let recognizer = recognizer.ok_or_else(|| "no recognizer is selected".to_string())?;
+    let recognizer = recognizer_for(side, settings, recognizers, preferred)?;
+    let mut warnings = Vec::new();
     if recognizer.backend != Backend::Asr(AsrBackend::Whisper) {
-        return Err(format!(
-            "{} decides the language itself and cannot be told which one is being spoken. \
-             Shared machine mode needs a Whisper recognizer.",
-            recognizer.name
-        ));
-    }
-    if !recognizer.enabled() {
-        return Err(format!(
-            "{} is missing files: {}",
-            recognizer.name,
-            recognizer.missing_files().join(", ")
-        ));
-    }
-    if !declares(recognizer, &source) {
-        return Err(format!(
-            "{} does not list \"{source}\" among its languages, so it cannot hear this side",
+        warnings.push(format!(
+            "{} decides the language itself rather than being told it, so it may mishear a \
+             short sentence",
             recognizer.name
         ));
     }
@@ -132,50 +189,51 @@ pub fn direction(
     let chosen = voices
         .iter()
         .find(|v| v.dir_name == configured && v.enabled() && declares(v, &target));
-    let (voice, warning) = match chosen {
-        Some(voice) => (voice, None),
+    let voice = match chosen {
+        Some(voice) => voice,
         None => {
             let fallback = voices_for(&target, voices)
                 .into_iter()
                 .next()
+                .map(|r| r.engine)
                 .ok_or_else(|| {
                     format!(
                     "no installed voice speaks \"{target}\", so this side's words could not be \
                      spoken"
                 )
                 })?;
-            let warning = (!configured.is_empty()).then(|| {
-                format!(
+            if !configured.is_empty() {
+                warnings.push(format!(
                     "the voice \"{configured}\" is not installed, or does not speak \
                      \"{target}\"; using \"{}\" instead",
                     fallback.dir_name
-                )
-            });
-            (fallback, warning)
+                ));
+            }
+            fallback
         }
     };
 
     Ok(Resolved {
         direction: Direction {
             side,
+            asr: recognizer.dir_name.clone(),
             source,
             target,
             voice: voice.dir_name.clone(),
         },
-        warning,
+        warnings,
     })
 }
 
 /// The usable voices that speak `language`, in discovery order, for a side's
 /// voice picker.
-pub fn voices_for<'a>(language: &str, voices: &'a [Engine]) -> Vec<&'a Engine> {
-    voices
-        .iter()
-        .filter(|v| v.enabled() && declares(v, language))
-        .collect()
+pub fn voices_for<'a>(language: &str, voices: &'a [Engine]) -> Vec<Ranked<'a>> {
+    crate::models::rank(language, voices)
 }
 
-fn declares(engine: &Engine, language: &str) -> bool {
+/// Whether a model lists the language of a tag (`es` for `es-MX`).
+fn declares(engine: &Engine, tag: &str) -> bool {
+    let language = crate::varieties::language_of(tag);
     engine
         .languages
         .iter()
@@ -197,6 +255,7 @@ mod tests {
             kind: EngineKind::Segment,
             backend,
             languages: languages.iter().map(|l| l.to_string()).collect(),
+            varieties: Vec::new(),
             files: vec![ModelFile {
                 role: "model".to_string(),
                 name: "model.onnx".to_string(),
@@ -234,22 +293,25 @@ mod tests {
 
     #[test]
     fn the_left_key_translates_left_into_right() {
-        let r = direction(Side::Left, &settings(), Some(&whisper()), &voices()).expect("a turn");
+        let r =
+            direction(Side::Left, &settings(), &[whisper()], "whisper", &voices()).expect("a turn");
         assert_eq!(
             r.direction,
             Direction {
                 side: Side::Left,
+                asr: "whisper".into(),
                 source: "en".into(),
                 target: "es".into(),
                 voice: "piper-es-es".into(),
             }
         );
-        assert!(r.warning.is_none());
+        assert!(r.warnings.is_empty());
     }
 
     #[test]
     fn the_right_key_translates_right_into_left() {
-        let r = direction(Side::Right, &settings(), Some(&whisper()), &voices()).expect("a turn");
+        let r = direction(Side::Right, &settings(), &[whisper()], "whisper", &voices())
+            .expect("a turn");
         assert_eq!(r.direction.source, "es");
         assert_eq!(r.direction.target, "en");
         assert_eq!(
@@ -262,7 +324,7 @@ mod tests {
     fn a_voice_is_chosen_by_folder_so_two_spanish_voices_can_be_told_apart() {
         let mut s = settings();
         s.left_voice = "piper-es-mx".into();
-        let r = direction(Side::Left, &s, Some(&whisper()), &voices()).expect("a turn");
+        let r = direction(Side::Left, &s, &[whisper()], "whisper", &voices()).expect("a turn");
         assert_eq!(r.direction.voice, "piper-es-mx");
     }
 
@@ -270,29 +332,75 @@ mod tests {
     fn a_missing_voice_falls_back_and_says_so() {
         let mut s = settings();
         s.left_voice = "deleted-voice".into();
-        let r = direction(Side::Left, &s, Some(&whisper()), &voices()).expect("still a turn");
+        let r =
+            direction(Side::Left, &s, &[whisper()], "whisper", &voices()).expect("still a turn");
         assert_eq!(r.direction.voice, "piper-es-es", "the first Spanish voice");
-        let warning = r.warning.expect("the column must say what happened");
+        let warning = r.warnings.join(" ");
         assert!(warning.contains("deleted-voice"), "{warning}");
 
         // A voice in the wrong language is no better than a missing one.
         s.left_voice = "piper-en".into();
-        let r = direction(Side::Left, &s, Some(&whisper()), &voices()).expect("still a turn");
+        let r =
+            direction(Side::Left, &s, &[whisper()], "whisper", &voices()).expect("still a turn");
         assert_eq!(r.direction.voice, "piper-es-es");
-        assert!(r.warning.is_some());
+        assert!(!r.warnings.is_empty());
     }
 
     #[test]
-    fn a_recognizer_that_guesses_the_language_is_refused() {
+    fn a_recognizer_that_guesses_the_language_is_allowed_with_a_note() {
         let parakeet = engine(
             "parakeet",
             Backend::Asr(AsrBackend::NemoTransducer),
             &["en", "es"],
             true,
         );
-        let why = direction(Side::Left, &settings(), Some(&parakeet), &voices())
-            .expect_err("Parakeet can't be told the language");
-        assert!(why.contains("Whisper"), "{why}");
+        let r = direction(Side::Left, &settings(), &[parakeet], "parakeet", &voices())
+            .expect("Parakeet covers English");
+        assert_eq!(r.direction.asr, "parakeet");
+        assert!(r
+            .warnings
+            .iter()
+            .any(|w| w.contains("decides the language itself")));
+    }
+
+    #[test]
+    fn each_side_gets_its_own_recognizer() {
+        // English on the left with Parakeet, Spanish on the right with a
+        // Spanish-only Whisper: the example from dialect-per-side.md.
+        let parakeet = engine(
+            "parakeet",
+            Backend::Asr(AsrBackend::NemoTransducer),
+            &["en"],
+            true,
+        );
+        let spanish = engine(
+            "whisper-es",
+            Backend::Asr(AsrBackend::Whisper),
+            &["es"],
+            true,
+        );
+        let all = [parakeet, spanish];
+        let mut s = settings();
+        s.left_asr = "parakeet".into();
+        s.right_asr = "whisper-es".into();
+        let left = direction(Side::Left, &s, &all, "", &voices()).expect("left");
+        let right = direction(Side::Right, &s, &all, "", &voices()).expect("right");
+        assert_eq!(left.direction.asr, "parakeet");
+        assert_eq!(right.direction.asr, "whisper-es");
+
+        // Left unset: the best match for English, never the Spanish-only model.
+        s.left_asr.clear();
+        let best = direction(Side::Left, &s, &all, "whisper-es", &voices()).expect("left");
+        assert_eq!(best.direction.asr, "parakeet");
+    }
+
+    #[test]
+    fn a_configured_recognizer_is_never_swapped_for_another() {
+        let mut s = settings();
+        s.left_asr = "deleted-model".into();
+        let why = direction(Side::Left, &s, &[whisper()], "whisper", &voices())
+            .expect_err("a missing configured recognizer is refused");
+        assert!(why.contains("deleted-model"), "{why}");
     }
 
     #[test]
@@ -303,17 +411,36 @@ mod tests {
             &["en"],
             true,
         );
-        assert!(direction(Side::Left, &settings(), Some(&english_only), &voices()).is_ok());
-        let why = direction(Side::Right, &settings(), Some(&english_only), &voices())
-            .expect_err("it cannot hear Spanish");
+        assert!(direction(
+            Side::Left,
+            &settings(),
+            std::slice::from_ref(&english_only),
+            "whisper-en",
+            &voices()
+        )
+        .is_ok());
+        let why = direction(
+            Side::Right,
+            &settings(),
+            std::slice::from_ref(&english_only),
+            "whisper-en",
+            &voices(),
+        )
+        .expect_err("it cannot hear Spanish");
         assert!(why.contains("\"es\""), "{why}");
     }
 
     #[test]
     fn no_voice_for_the_target_language_is_refused() {
         let only_english = vec![voice("piper-en", "en")];
-        let why = direction(Side::Left, &settings(), Some(&whisper()), &only_english)
-            .expect_err("nothing can speak Spanish");
+        let why = direction(
+            Side::Left,
+            &settings(),
+            &[whisper()],
+            "whisper",
+            &only_english,
+        )
+        .expect_err("nothing can speak Spanish");
         assert!(why.contains("\"es\""), "{why}");
     }
 
@@ -325,12 +452,12 @@ mod tests {
             &["en", "es"],
             false,
         );
-        assert!(direction(Side::Left, &settings(), Some(&broken), &voices()).is_err());
-        assert!(direction(Side::Left, &settings(), None, &voices()).is_err());
+        assert!(direction(Side::Left, &settings(), &[broken], "whisper", &voices()).is_err());
+        assert!(direction(Side::Left, &settings(), &[], "", &voices()).is_err());
 
         let mut same = settings();
         same.right_language = "en".into();
-        assert!(direction(Side::Left, &same, Some(&whisper()), &voices()).is_err());
+        assert!(direction(Side::Left, &same, &[whisper()], "whisper", &voices()).is_err());
 
         // A broken voice is never chosen, even when it is the configured one.
         let mut s = settings();
@@ -342,16 +469,29 @@ mod tests {
             &["es"],
             false,
         );
-        let r = direction(Side::Left, &s, Some(&whisper()), &vs).expect("falls back");
+        let r = direction(Side::Left, &s, &[whisper()], "whisper", &vs).expect("falls back");
         assert_eq!(r.direction.voice, "piper-es-es");
-        assert!(r.warning.is_some());
+        assert!(!r.warnings.is_empty());
+    }
+
+    #[test]
+    fn a_side_set_to_a_variety_hears_its_language_and_an_unknown_tag_is_refused() {
+        let mut s = settings();
+        s.right_language = "es-MX".into();
+        let r = direction(Side::Right, &s, &[whisper()], "whisper", &voices())
+            .expect("es-MX is Spanish");
+        assert_eq!(r.direction.source, "es-MX");
+        s.right_language = "xx-YY".into();
+        let why =
+            direction(Side::Right, &s, &[whisper()], "whisper", &voices()).expect_err("unknown");
+        assert!(why.contains("xx-YY"), "{why}");
     }
 
     #[test]
     fn the_picker_lists_only_usable_voices_for_the_language() {
         let names: Vec<_> = voices_for("es", &voices())
             .iter()
-            .map(|v| v.dir_name.clone())
+            .map(|v| v.engine.dir_name.clone())
             .collect();
         assert_eq!(names, vec!["piper-es-es", "piper-es-mx"]);
     }

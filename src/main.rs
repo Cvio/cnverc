@@ -24,6 +24,7 @@ mod shared;
 mod translate;
 mod tts;
 mod vad;
+mod varieties;
 mod wav;
 mod wire;
 

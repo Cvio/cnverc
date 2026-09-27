@@ -2,6 +2,7 @@ name = "Piper en_US lessac (medium)"
 kind = "segment"
 backend = "vits"
 languages = ["en"]
+varieties = ["en-US"]   # the dialect this voice speaks
 
 # espeak-ng does the pronunciation for Piper voices. It is a directory, so it
 # cannot be declared under [files].

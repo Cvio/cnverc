@@ -46,6 +46,13 @@ pub fn print_table(title: &str, root: &Path, entries: &[Entry]) {
                 );
                 println!("  {:<NAME_W$}  {}", "", engine.name);
                 println!("  {:<NAME_W$}  {}", "", engine.dir.display());
+                if !engine.varieties.is_empty() {
+                    println!(
+                        "  {:<NAME_W$}  tuned for: {}",
+                        "",
+                        engine.varieties.join(", ")
+                    );
+                }
                 if !engine.languages.is_empty() {
                     println!(
                         "  {:<NAME_W$}  languages: {}",

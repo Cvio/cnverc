@@ -41,8 +41,8 @@ use crate::paths;
 use crate::peer::{self, PeerState};
 use crate::pipeline::{self, Options, Pipeline, PipelineCmd, PipelineMsg};
 use crate::shared::{self, Side};
-use crate::translate::language_name;
 use crate::tts;
+use crate::varieties;
 use tracing::info;
 
 /// How often the window wakes to read messages while the pipeline runs.
@@ -301,6 +301,8 @@ pub struct Session {
     /// Shared machine: whose turn is being recorded, worked on or spoken.
     /// Cleared when the turn is fully over.
     pub active_side: Option<Side>,
+    /// Shared machine: a side whose recognizer couldn't be loaded, and why.
+    pub side_problems: HashMap<Side, String>,
 }
 
 impl Default for Session {
@@ -322,6 +324,7 @@ impl Default for Session {
             floor_note: None,
             discovered: Vec::new(),
             active_side: None,
+            side_problems: HashMap::new(),
         }
     }
 }
@@ -377,6 +380,14 @@ impl Session {
                 self.floor_note = None;
                 self.active_side = side;
             }
+            PipelineMsg::SharedSide { side, problem } => match problem {
+                Some(why) => {
+                    self.side_problems.insert(side, why);
+                }
+                None => {
+                    self.side_problems.remove(&side);
+                }
+            },
             PipelineMsg::TurnCancelled => {
                 self.turn = TurnState::Idle;
                 self.active_side = None;
@@ -827,16 +838,19 @@ impl App {
                     info!("shared machine: {side} key ignored: {why}");
                 }
                 SharedPress::Begin => {
-                    let recognizer = self.selected_recognizer();
-                    match shared::direction(side, &self.config.shared, recognizer, &self.voices) {
+                    let recognizers = self.asr_engines();
+                    match shared::direction(
+                        side,
+                        &self.config.shared,
+                        &recognizers,
+                        &self.config.asr.engine,
+                        &self.voices,
+                    ) {
                         Ok(resolved) => {
-                            match resolved.warning {
-                                Some(warning) => {
-                                    self.shared_notes.insert(side, warning);
-                                }
-                                None => {
-                                    self.shared_notes.remove(&side);
-                                }
+                            if resolved.warnings.is_empty() {
+                                self.shared_notes.remove(&side);
+                            } else {
+                                self.shared_notes.insert(side, resolved.warnings.join(" "));
                             }
                             info!("shared machine: {side} key; starting the {side} turn");
                             pipeline.send(PipelineCmd::BeginSharedTurn(resolved.direction));
@@ -1229,6 +1243,17 @@ impl App {
             .map(|e| format!("{e:#}"));
     }
 
+    /// Every recognizer that parsed, whether or not its files are all present.
+    fn asr_engines(&self) -> Vec<Engine> {
+        self.recognizers
+            .iter()
+            .filter_map(|entry| match entry {
+                Entry::Loaded(e) => Some(e.clone()),
+                Entry::Failed { .. } => None,
+            })
+            .collect()
+    }
+
     fn selected_recognizer(&self) -> Option<&Engine> {
         self.recognizers.iter().find_map(|entry| match entry {
             Entry::Loaded(e) if e.dir_name == self.config.asr.engine => Some(e),
@@ -1248,6 +1273,10 @@ impl App {
             .flatten()
             .chain(self.voices.iter().flat_map(|v| v.languages.clone()))
             .filter(|l| l != "...")
+            // Only what the varieties table knows: an unknown one would be
+            // refused by the translator.
+            .filter(|l| varieties::lookup(l).is_some())
+            .map(|l| l.to_lowercase())
             .collect();
         languages.sort();
         languages.dedup();
@@ -1319,6 +1348,9 @@ impl App {
     fn recognizer_picker(&mut self, ui: &mut egui::Ui) -> bool {
         let mut changed = false;
         ui.label("Recognizer");
+        if self.config.mode.kind == ModeKind::Shared {
+            ui.weak("In Shared machine mode each person has their own, above their column;                      this one is used for a side left on \"best match\" when it fits.");
+        }
         let current = self
             .selected_recognizer()
             .map(|e| e.name.clone())
@@ -1391,16 +1423,7 @@ impl App {
             ),
         ] {
             ui.label(label);
-            egui::ComboBox::from_id_salt(id)
-                .width(ui.available_width())
-                .selected_text(describe_language(value))
-                .show_ui(ui, |ui| {
-                    for code in &languages {
-                        changed |= ui
-                            .selectable_value(value, code.clone(), describe_language(code))
-                            .changed();
-                    }
-                });
+            changed |= language_and_variety(ui, id, "", value, &languages);
         }
 
         if self.config.languages.source == self.config.languages.target {
@@ -1483,9 +1506,16 @@ impl App {
                 ui.weak("Voices are chosen for each side, above the two columns.");
                 return;
             }
-            match tts::for_language(&self.voices, &self.config.languages.target) {
+            let fit = crate::models::rank(&self.config.languages.target, &self.voices)
+                .first()
+                .map(|r| r.fit.label(&self.config.languages.target));
+            match tts::choose(&self.voices, &self.config.languages.target) {
                 Ok(voice) => {
-                    ui.weak(format!("Voice: {}", voice.name));
+                    ui.weak(format!(
+                        "Voice: {} ({})",
+                        voice.name,
+                        fit.unwrap_or_default()
+                    ));
                 }
                 Err(_) => {
                     ui.colored_label(
@@ -1634,6 +1664,13 @@ impl App {
         }
         if changed {
             self.save();
+            // Load and prepare the sides' recognizers now, not on the next
+            // key press.
+            if let Some(pipeline) = &self.pipeline {
+                pipeline.send(PipelineCmd::PrepareShared(Box::new(
+                    self.config.shared.clone(),
+                )));
+            }
         }
         ui.add_space(6.0);
 
@@ -1649,11 +1686,43 @@ impl App {
     /// spoken in.
     fn shared_settings(&mut self, ui: &mut egui::Ui, side: Side) -> bool {
         let languages = self.known_languages();
-        let voices: Vec<(String, String)> =
-            shared::voices_for(side.other().language(&self.config.shared), &self.voices)
+        let voices: Vec<(String, String)> = {
+            let spoken = side.other().language(&self.config.shared).to_string();
+            shared::voices_for(&spoken, &self.voices)
                 .into_iter()
-                .map(|v| (v.dir_name.clone(), v.name.clone()))
-                .collect();
+                .map(|v| {
+                    (
+                        v.engine.dir_name.clone(),
+                        format!("{} — {}", v.engine.name, v.fit.label(&spoken)),
+                    )
+                })
+                .collect()
+        };
+        // Only recognizers that list this side's language, and what "best
+        // match" would pick right now.
+        let engines = self.asr_engines();
+        let recognizers: Vec<(String, String)> = {
+            let heard = side.language(&self.config.shared).to_string();
+            shared::recognizers_for(&heard, &engines)
+                .into_iter()
+                .map(|r| {
+                    (
+                        r.engine.dir_name.clone(),
+                        format!("{} — {}", r.engine.name, r.fit.label(&heard)),
+                    )
+                })
+                .collect()
+        };
+        let best = {
+            let mut unset = self.config.shared.clone();
+            match side {
+                Side::Left => unset.left_asr.clear(),
+                Side::Right => unset.right_asr.clear(),
+            }
+            shared::recognizer_for(side, &unset, &engines, &self.config.asr.engine)
+                .map(|e| e.name.clone())
+                .unwrap_or_else(|_| "none installed".to_string())
+        };
         let mut changed = false;
         let title = match side {
             Side::Left => "Left person",
@@ -1661,26 +1730,55 @@ impl App {
         };
         ui.label(RichText::new(title).strong());
 
-        let (language, voice) = match side {
+        let (language, voice, asr) = match side {
             Side::Left => (
                 &mut self.config.shared.left_language,
                 &mut self.config.shared.left_voice,
+                &mut self.config.shared.left_asr,
             ),
             Side::Right => (
                 &mut self.config.shared.right_language,
                 &mut self.config.shared.right_voice,
+                &mut self.config.shared.right_asr,
             ),
         };
-        egui::ComboBox::from_id_salt(("shared language", side.to_string()))
-            .width(ui.available_width())
-            .selected_text(format!("Speaks {}", describe_language(language)))
-            .show_ui(ui, |ui| {
-                for code in &languages {
-                    changed |= ui
-                        .selectable_value(language, code.clone(), describe_language(code))
-                        .changed();
+        changed |= language_and_variety(
+            ui,
+            &format!("shared language {side}"),
+            "Speaks ",
+            language,
+            &languages,
+        );
+
+        let heard_by = recognizers
+            .iter()
+            .find(|(folder, _)| folder == asr)
+            .map(|(_, name)| format!("Heard by: {name}"))
+            .unwrap_or_else(|| {
+                if asr.is_empty() {
+                    format!("Heard by: best match ({best})")
+                } else {
+                    format!("Heard by: {asr} (not usable for this language)")
                 }
             });
+        egui::ComboBox::from_id_salt(("shared recognizer", side.to_string()))
+            .width(ui.available_width())
+            .selected_text(heard_by)
+            .show_ui(ui, |ui| {
+                changed |= ui
+                    .selectable_value(asr, String::new(), format!("Best match ({best})"))
+                    .changed();
+                for (folder, name) in &recognizers {
+                    changed |= ui
+                        .selectable_value(asr, folder.clone(), format!("{name} ({folder})"))
+                        .changed();
+                }
+            })
+            .response
+            .on_hover_text(
+                "The recognizer that hears this person. Only recognizers that list this \
+                 person's language are shown.",
+            );
 
         let shown = voices
             .iter()
@@ -1756,15 +1854,21 @@ impl App {
             (format!("Ready - press {key}"), GREEN)
         };
 
-        // Why this side can't take a turn, worked out now so it shows before
-        // anyone presses the key.
-        let refusal = shared::direction(
+        // Why this side can't take a turn, or what to know about it (a voice
+        // that fell back, a recognizer that guesses the language), worked out
+        // now so it shows before anyone presses the key.
+        let refusal = match shared::direction(
             side,
             &self.config.shared,
-            self.selected_recognizer(),
+            &self.asr_engines(),
+            &self.config.asr.engine,
             &self.voices,
-        )
-        .err();
+        ) {
+            Err(why) => Some(why),
+            Ok(resolved) if !resolved.warnings.is_empty() => Some(resolved.warnings.join(" ")),
+            Ok(_) => None,
+        }
+        .or_else(|| s.side_problems.get(&side).cloned());
 
         egui::Frame::new()
             .fill(if mine { fill } else { IDLE })
@@ -1781,7 +1885,7 @@ impl App {
             .show(ui, |ui| {
                 ui.set_width(ui.available_width());
                 ui.label(
-                    RichText::new(format!("{} - {key}", language_name(language)))
+                    RichText::new(format!("{} - {key}", varieties::display_name(language)))
                         .size(34.0)
                         .strong()
                         .color(Color32::WHITE),
@@ -1803,10 +1907,11 @@ impl App {
                 } else {
                     ui.label(status_text);
                 }
-                for problem in [refusal.as_ref(), self.shared_notes.get(&side)]
-                    .into_iter()
-                    .flatten()
-                {
+                let note = self
+                    .shared_notes
+                    .get(&side)
+                    .filter(|n| Some(*n) != refusal.as_ref());
+                for problem in [refusal.as_ref(), note].into_iter().flatten() {
                     ui.label(
                         RichText::new(problem)
                             .color(Color32::from_rgb(255, 200, 120))
@@ -2003,13 +2108,56 @@ impl eframe::App for App {
     }
 }
 
-fn describe_language(code: &str) -> String {
-    let name = language_name(code);
-    if name == code {
-        code.to_string()
-    } else {
-        format!("{name} ({code})")
+/// Two dropdowns for one language setting: the language, then its variety
+/// ("(any)" or one from src/varieties.rs), shown only when the table lists
+/// varieties for it. Choosing a new language clears the variety. Returns
+/// whether the value changed.
+fn language_and_variety(
+    ui: &mut egui::Ui,
+    id: &str,
+    prefix: &str,
+    value: &mut String,
+    languages: &[String],
+) -> bool {
+    let before = value.clone();
+    let mut language = varieties::language_of(value).to_lowercase();
+    egui::ComboBox::from_id_salt((id, "language"))
+        .width(ui.available_width())
+        .selected_text(format!("{prefix}{}", describe_language(&language)))
+        .show_ui(ui, |ui| {
+            for code in languages {
+                ui.selectable_value(&mut language, code.clone(), describe_language(code));
+            }
+        });
+    if language != varieties::language_of(value).to_lowercase() {
+        *value = language.clone();
     }
+    let options = varieties::varieties_of(&language);
+    if !options.is_empty() {
+        egui::ComboBox::from_id_salt((id, "variety"))
+            .width(ui.available_width())
+            .selected_text(if varieties::has_variety(value) {
+                format!("Variety: {}", varieties::display_name(value))
+            } else {
+                "Variety: (any)".to_string()
+            })
+            .show_ui(ui, |ui| {
+                ui.selectable_value(value, language.clone(), "(any)");
+                for v in options {
+                    ui.selectable_value(value, v.tag.to_string(), v.display);
+                }
+            })
+            .response
+            .on_hover_text(
+                "A regional variety: models tuned for it are offered first, and the \
+                 translation is asked to use its everyday wording.",
+            );
+    }
+    *value != before
+}
+
+fn describe_language(code: &str) -> String {
+    format!("{} ({})", varieties::display_name(code), code.trim())
 }
 
 /// A key as a person reads it. In words, not arrow symbols: egui's built-in

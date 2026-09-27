@@ -186,23 +186,41 @@ later. Older PyTorch wheels install fine and then fail on the card, so check
 `ubox` and the 4070 laptop are not needed for any of this. The trained models become ordinary
 files in `models/`, and run on whatever machine cnverc runs on.
 
-## Code changes cnverc will need
+## How cnverc handles dialects (varieties)
 
-A tuned model drops in as a folder, but three small code changes stand between that and a dialect
-that actually works.
+Built in M7.7. The three code changes this section used to list are done.
 
-- **Language names in the translation prompt.** `language_name` in `translate.rs` only knows
-  German, English, Spanish, French, Italian and Portuguese. Anything else falls through to the bare
-  code, so the translator is asked to translate "into ar". Add Arabic - and the dialect name, once
-  the prompt names one - before judging any Arabic translation.
-- **A variety in the prompt.** The prompt names a language, not a dialect. Asking for "Iraqi
-  Arabic" or "Mexican Spanish" needs the chosen variety passed into `translate.rs`.
-- **The voice picker already filed in `HANDOFF.md`.** Two voices for one language have no tiebreak
-  today. The descriptor parser rejects unknown fields, so `models.rs` has to declare a `variety`
-  key before any `engine.toml` can carry one.
+- **A variety is a BCP 47 tag,** a language plus a region: `es-MX`, `ar-IQ`, `ar-JO`, `en-US`.
+  Every language setting may hold one; a plain `es` means no particular dialect. The known
+  varieties are rows in `src/varieties.rs` (tag, name shown in the window, name used in the
+  prompt). **Adding a dialect is one row.** A tag not in the table is refused, not guessed.
+- **Models declare what they're tuned for** in `engine.toml`:
 
-None of these are milestone work, and SPEC says build in milestone order. They are small, though,
-and without the first one any Arabic measurement is testing a prompt bug rather than the model.
+  ```toml
+  languages = ["es"]
+  varieties = ["es-MX"]   # optional
+  ```
+
+  Each variety must be in the table and belong to one of `languages`, or the model is shown as
+  broken. No `varieties` line means a general model.
+- **The matching rule** (`models::rank`). For a side set to `es-MX`, recognizer and voice pickers
+  list: tuned for exactly `es-MX` ("tuned for Spanish (Mexico)"), then general `es` models
+  ("general"), then models tuned for another Spanish variety, labelled with it. For a plain `es`,
+  general models come first. The default is the first entry. This also settles which of two
+  Spanish voices speaks.
+- **Recognition:** Whisper is told the language only (`es`, never `es-MX`), and the log says so on
+  every utterance. The variety helps by choosing the model: tune a Whisper on the dialect, label
+  it, and it's offered first.
+- **Translation:** the prompt names the variety ("Translate the user's Iraqi Arabic text…"), and
+  for a target variety adds: *Write it the way an Iraqi Arabic speaker would say it aloud, using
+  everyday spoken wording rather than the formal written standard.*
+- **Paired mode** sends the full tag (protocol version 2).
+
+**The limit, plainly:** the prompt can *ask* for Iraqi Arabic; whether Qwen3 1.7B can *write*
+convincing Iraqi Arabic is another matter. In the first test (the `dialect_pairs` test in
+`translate.rs`), asking for `es-MX` and `ar-IQ` changed the wording but did not clearly produce
+either dialect. The fix for that is a translator tuned on dialect text, below, not a bigger
+prompt.
 
 ## Worked example: Iraqi Arabic vs Mexican Spanish
 

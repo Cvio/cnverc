@@ -238,9 +238,13 @@ the microphone while speaking** ticked, so cnverc doesn't translate its own voic
 Two people sit at one PC, each with their own key: **Left arrow** for the person on the left,
 **Right arrow** for the person on the right.
 
-1. Choose **Shared machine**, and the **Whisper** recognizer. Parakeet can't be used here: it
-   can't be told which language to expect.
-2. Above the two columns, set each person's language, and the voice their words are spoken in.
+1. Choose **Shared machine**.
+2. Above each column, set that person's language (and variety, if you like), the recognizer
+   that hears them (**Heard by**), and the voice their words are spoken in. Each person can have
+   a different recognizer, for example a Spanish-tuned Whisper for the Spanish speaker. Only
+   recognizers that know that person's language are listed. Leave **Best match** if unsure.
+   Parakeet works too, but it decides the language itself, so a short sentence can be misheard;
+   the column says so.
 3. Press **Start**. To talk, press **your** key, speak, and press it again.
 
 Only one person talks at a time. While one is talking, the other key does nothing, and while
@@ -269,6 +273,22 @@ headsets**, or the two PCs translate each other in a loop.
 
 If it won't connect, the pairing panel says why. See
 [If something goes wrong](#if-something-goes-wrong).
+
+### Dialects (varieties)
+
+Under each language there's a second dropdown, **Variety**: for example *Spanish (Mexico)* or
+*Arabic (Iraq)*. Leave it on **(any)** for no particular dialect. Choosing a variety does two
+things:
+
+- **Models tuned for it are offered first.** Recognizer and voice lists are ordered: tuned for
+  that variety, then *general*, then models tuned for another variety (labelled, so you don't
+  pick one by accident).
+- **The translator is asked to use it:** to write the way a speaker of that dialect would say it
+  aloud, not the formal standard. How well a small translator manages this varies. See
+  [DIALECTS.md](DIALECTS.md).
+
+The recognizer is told only the language (`es`), never the variety: the variety helps through
+which model hears you.
 
 ### Other settings
 
@@ -386,6 +406,11 @@ hand.
   **Qwen3** model.
 - **Voices:** for a new language, add a Piper voice in its own folder with an `engine.toml`;
   see [ARCHITECTURE.md → Add a voice](ARCHITECTURE.md#add-a-voice).
+- **Labelling a model's dialect:** add a `varieties` line to its `engine.toml`, under
+  `languages`, for example `varieties = ["es-MX"]`. Each variety must be one cnverc knows
+  (listed in `src/varieties.rs`; adding one is one line there) and belong to a language in
+  `languages`, otherwise `--report` shows the model as broken, with the reason. A model with no
+  `varieties` line is *general*. `--report` shows each model's "tuned for" line.
 - **Your own Whisper model:** the separate
   [model-converter](https://github.com/Cvio/model-converter) project converts one from Hugging
   Face.

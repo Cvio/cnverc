@@ -198,14 +198,19 @@ Nothing is outstanding from M0–M7. The `[en]`-captioned Spanish clip in sectio
 bug and needs no work: cnverc doesn't detect language, the clip simply didn't match the
 configured `source`, and the echo guard behaved correctly.
 
-Filed, not started, and not part of any milestone: a **voice picker**. Installing a second
-Spanish voice (`vits-piper-es_MX-claude-high`, 2026-09-20) means two TTS entries declare
-`languages = ["es"]`, and `for_language` has no tiebreak and no config key - whichever it
-picks is arbitrary and the user can't change it. The likely shape is the same as the
-recognizer picker: list installed voices for the target language by their `engine.toml`
-`name`, save the choice in `cnverc.toml`. Note that the descriptor parser **rejects unknown
-fields**, so a `variety = "es-MX"` key cannot be added to an `engine.toml` until `models.rs`
-declares it.
+**Closed (M7.7): the voice picker.** Two Spanish voices both declaring `languages = ["es"]`
+had no tiebreak. Voices now carry `varieties` in `engine.toml`, and `models::rank` orders them
+(tuned for the variety, then general, then other varieties), so the choice follows the language
+setting's variety; Shared mode also has a per-side voice picker. See DIALECTS.md.
+
+**Open from M7.6–M7.7:**
+- Their hand checks: Parakeet on one side and a Spanish Whisper on the other; a side set to
+  Spanish (Mexico) offering the Mexico-tuned voice first; two PCs pairing on protocol 2.
+- A dialect-tuned translator: the dialect prompt alone barely changes Qwen3 1.7B's output (the
+  `dialect_pairs` test).
+- The translator folder holds a bare `.gguf` with no `engine.toml`, so a translator can't yet
+  declare `varieties` or be labelled in a dropdown. That needs a descriptor for `models/mt/`,
+  deliberately left for when a dialect-tuned translator exists.
 
 Also filed, not started, none of them urgent - three defects in the **peer panel**, found on
 2026-09-20 while pairing the Windows PC and `ubox` over a direct Ethernet cable. The pairing

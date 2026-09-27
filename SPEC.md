@@ -584,6 +584,23 @@ language used for every turn; the other key does nothing during a turn; Escape d
 means nothing is spoken; cnverc never translates its own voice; from across a table you can
 tell whose turn it is; turn-based, continuous and paired mode behave as before.
 
+**M7.6 - A recognizer per shared-machine side.** Added after M7.5, before M8; M8 and M9 keep
+their numbers. In Shared mode each side has its own recognizer (`[shared].left_asr` /
+`right_asr`, empty = best match), listed only if it covers that side's language, loaded when
+Shared mode starts or a picker changes and kept loaded; a model chosen for both sides loads
+once. A side whose recognizer fails to load says so in its column, and the other keeps working.
+*Check:* Parakeet on the left and a Spanish-tuned Whisper on the right; English on the left and
+Spanish on the right both transcribe correctly, and the log names the recognizer for each turn.
+
+**M7.7 - Varieties (dialects).** Every language setting may hold a BCP 47 variety (`es-MX`),
+from a table in `src/varieties.rs`; `engine.toml` may declare `varieties`; recognizers and voices
+are ranked tuned, general, other-variety; Whisper is told the language only; the translation
+prompt names the variety and asks for its spoken form; paired mode sends full tags (protocol
+2). Specified in `dialect-per-side.md`.
+*Check:* a side set to Spanish (Mexico) offers the Mexico-tuned voice first, labelled; a turn in
+`es-MX` logs `es` going to Whisper; two machines pair and the translation arrives in the right
+variety.
+
 **M8 - Streaming ASR.** `StreamAsr` against `OnlineRecognizer` with a streaming model. `Partial`
 messages flowing to the caption pane. Commit policy: hold a prefix until it is unchanged across N
 successive updates before passing it downstream (LocalAgreement).

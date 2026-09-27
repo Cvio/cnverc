@@ -312,13 +312,19 @@ impl WhisperAsr {
 
 impl SegmentAsr for WhisperAsr {
     fn transcribe(&mut self, pcm: &[f32], language: &str) -> Result<String> {
+        // Whisper takes plain language codes only. Told "es-MX" it could fall
+        // back to guessing the language, usually guess right, and hide the
+        // bug. The variety matters through which model hears it, not here.
+        let language = crate::varieties::language_of(language);
+        info!("  \"{}\" is told the language \"{language}\"", self.name);
         let name = self.name.clone();
         let recognizer = self.recognizer(language)?;
         decode(recognizer, pcm).with_context(|| format!("\"{name}\" failed to transcribe"))
     }
 
     fn prepare(&mut self, language: &str) -> Result<()> {
-        self.recognizer(language).map(|_| ())
+        self.recognizer(crate::varieties::language_of(language))
+            .map(|_| ())
     }
 }
 
@@ -353,7 +359,9 @@ mod tests {
         whisper.prepare("es").expect("prepare Spanish");
         assert_eq!(whisper.recognizers.len(), 2);
 
-        for language in ["en", "es", "en", "es"] {
+        // "es-MX" must reach Whisper as "es", using the Spanish recognizer
+        // already built rather than a third one.
+        for language in ["en", "es", "en", "es-MX"] {
             let began = std::time::Instant::now();
             let text = whisper.transcribe(&pcm, language).expect("transcribe");
             println!("{language}: {} ms: {text}", began.elapsed().as_millis());

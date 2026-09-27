@@ -152,25 +152,33 @@ impl Voice {
 ///
 /// Never substitutes a voice in another language (SPEC §15) - being told that
 /// no English voice is installed is more useful than hearing Spanish.
+///
+/// Logs its choice when more than one voice fits. For loading a voice; the
+/// window, which asks on every redraw, uses [`choose`] instead.
 pub fn for_language<'a>(engines: &'a [Engine], language: &str) -> Result<&'a Engine> {
+    let best = choose(engines, language)?;
+    let matching = crate::models::rank(language, engines);
+    if matching.len() > 1 {
+        info!(
+            "{} voices speak \"{language}\"; using \"{}\" ({})",
+            matching.len(),
+            best.dir_name,
+            matching[0].fit.label(language)
+        );
+    }
+    Ok(best)
+}
+
+/// The same choice as [`for_language`], without logging it.
+pub fn choose<'a>(engines: &'a [Engine], language: &str) -> Result<&'a Engine> {
     let usable: Vec<&Engine> = engines.iter().filter(|e| e.enabled()).collect();
 
-    let matching: Vec<&&Engine> = usable
-        .iter()
-        .filter(|e| e.languages.iter().any(|l| l.eq_ignore_ascii_case(language)))
-        .collect();
+    // Best fit first: tuned for the variety, then general, then other
+    // varieties (models::rank). This is what decides between two Spanish voices.
+    let matching = crate::models::rank(language, engines);
 
     match matching.first() {
-        Some(engine) => {
-            if matching.len() > 1 {
-                info!(
-                    "{} voices speak \"{language}\"; using \"{}\"",
-                    matching.len(),
-                    engine.dir_name
-                );
-            }
-            Ok(engine)
-        }
+        Some(best) => Ok(best.engine),
         None => Err(anyhow!(
             "no installed voice speaks \"{language}\". Voices found: {}",
             if usable.is_empty() {

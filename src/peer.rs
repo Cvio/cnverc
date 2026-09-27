@@ -706,7 +706,9 @@ impl Peer {
         // What they send is what this PC will speak. Say so if it is not the
         // language this PC's person speaks; it is not an error, and the
         // receiving voice is chosen by each utterance's own language anyway.
-        if hello.sends != self.me.speaks {
+        // Compared by language: es-MX sent to someone set to plain es is fine.
+        let sends = crate::varieties::language_of(&hello.sends);
+        if !sends.eq_ignore_ascii_case(crate::varieties::language_of(&self.me.speaks)) {
             self.emit(PipelineMsg::Error(format!(
                 "{} translates into {}, but this PC is set up for someone who speaks {}. \
                  Check the languages on both PCs.",
@@ -1346,15 +1348,15 @@ mod tests {
         });
         let mut nc = TcpStream::connect("127.0.0.1:47941").expect("connect");
         nc.write_all(
-            b"{\"t\":\"Hello\",\"name\":\"netcat\",\"speaks\":\"en\",\"sends\":\"es\",\"proto\":1}\n\
+            b"{\"t\":\"Hello\",\"name\":\"netcat\",\"speaks\":\"en\",\"sends\":\"es-MX\",\"proto\":2}\n\
               this is not json\n\
-              {\"t\":\"Utterance\",\"seq\":1,\"lang\":\"es\",\"text\":\"Hola\",\"source_lang\":\"en\",\"source_text\":\"Hi\"}\n",
+              {\"t\":\"Utterance\",\"seq\":1,\"lang\":\"es-MX\",\"text\":\"Hola\",\"source_lang\":\"en\",\"source_text\":\"Hi\"}\n",
         )
         .expect("write");
         a.wait_for("nonsense reported", |m| matches!(m, PipelineMsg::Error(_)));
         a.wait_for(
             "the utterance",
-            |m| matches!(m, PipelineMsg::Remote { text, .. } if text == "Hola"),
+            |m| matches!(m, PipelineMsg::Remote { text, lang, .. } if text == "Hola" && lang == "es-MX"),
         );
 
         nc.write_all(

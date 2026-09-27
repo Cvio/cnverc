@@ -12,7 +12,11 @@
 use serde::{Deserialize, Serialize};
 
 /// The protocol version this build speaks.
-pub const PROTO: u32 = 1;
+///
+/// 2: languages may be varieties (`es-MX`), not only plain codes. The format
+/// is unchanged, but a version-1 peer would find no voice for `es-MX`, so the
+/// two refuse to pair, with a message, rather than lose speech quietly.
+pub const PROTO: u32 = 2;
 
 /// The longest line accepted, in bytes, newline included. An utterance is a
 /// few hundred bytes; anything near this is not one.
@@ -194,7 +198,7 @@ mod tests {
     #[test]
     fn the_spec_examples_parse() {
         let lines = [
-            r#"{"t":"Hello","name":"laptop-a","speaks":"es","sends":"en","proto":1}"#,
+            r#"{"t":"Hello","name":"laptop-a","speaks":"es","sends":"en","proto":2}"#,
             r#"{"t":"Utterance","seq":17,"lang":"en","text":"Where is the station?","source_lang":"es","source_text":"¿Dónde está la estación?"}"#,
             r#"{"t":"FloorRequest","seq":18}"#,
             r#"{"t":"FloorGrant","seq":18}"#,
@@ -235,10 +239,10 @@ mod tests {
 
     #[test]
     fn an_unknown_protocol_version_is_refused_by_name() {
-        let error = decode(br#"{"t":"Hello","name":"x","speaks":"es","sends":"en","proto":2}"#)
-            .expect_err("version 2");
-        assert_eq!(error, WireError::UnknownProto(2));
-        assert!(error.to_string().contains("version 2"));
+        let error = decode(br#"{"t":"Hello","name":"x","speaks":"es","sends":"en","proto":1}"#)
+            .expect_err("version 1, from before varieties");
+        assert_eq!(error, WireError::UnknownProto(1));
+        assert!(error.to_string().contains("version 1"));
     }
 
     #[test]
@@ -273,7 +277,7 @@ mod tests {
         // accepts them and sanitising is what removes them: a newline and a
         // bell character, as JSON escapes.
         let sneaky = format!(
-            r#"{{"t":"Hello","name":"a{e}nb{e}u0007c","speaks":"es","sends":"en","proto":1}}"#,
+            r#"{{"t":"Hello","name":"a{e}nb{e}u0007c","speaks":"es","sends":"en","proto":2}}"#,
             e = char::from(92) // a backslash
         );
         let Ok(Wire::Hello { name, .. }) = decode(sneaky.as_bytes()) else {

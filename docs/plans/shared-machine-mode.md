@@ -1,5 +1,8 @@
 # Instructions: shared-machine mode for cnverc
 
+> **Completed.** Kept for history. What was built is described in
+> [ARCHITECTURE.md](../../ARCHITECTURE.md) and [MODELS.md](../../MODELS.md).
+
 For Claude Code. Add a mode where two people who speak different languages use **one**
 machine. Each person has their own key. Press your key, speak, press it again, and the machine
 speaks your words in the other person's language.

@@ -41,8 +41,8 @@ use crate::paths;
 use crate::peer::{self, PeerState};
 use crate::pipeline::{self, Options, Pipeline, PipelineCmd, PipelineMsg};
 use crate::shared::{self, Side};
-use crate::translate::language_name;
 use crate::tts;
+use crate::varieties;
 use tracing::info;
 
 /// How often the window wakes to read messages while the pipeline runs.
@@ -1872,7 +1872,7 @@ impl App {
             .show(ui, |ui| {
                 ui.set_width(ui.available_width());
                 ui.label(
-                    RichText::new(format!("{} - {key}", language_name(language)))
+                    RichText::new(format!("{} - {key}", varieties::display_name(language)))
                         .size(34.0)
                         .strong()
                         .color(Color32::WHITE),
@@ -2096,12 +2096,7 @@ impl eframe::App for App {
 }
 
 fn describe_language(code: &str) -> String {
-    let name = language_name(code);
-    if name == code {
-        code.to_string()
-    } else {
-        format!("{name} ({code})")
-    }
+    format!("{} ({})", varieties::display_name(code), code.trim())
 }
 
 /// A key as a person reads it. In words, not arrow symbols: egui's built-in

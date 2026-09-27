@@ -1,4 +1,4 @@
-//! Playback, and the half-duplex gate that keeps cnverc from hearing itself.
+//! Playback, and the half-duplex gate that keeps Volis from hearing itself.
 //!
 //! SPEC §10: with TTS playing through speakers and the microphone live, the
 //! VAD triggers on the translated speech and the recognizer transcribes it,
@@ -169,7 +169,7 @@ impl Player {
             let stop = stop.clone();
             let name = name.clone();
             std::thread::Builder::new()
-                .name("cnverc-playback".to_string())
+                .name("volis-playback".to_string())
                 .spawn(move || {
                     player_thread(
                         device,
@@ -533,17 +533,17 @@ mod tests {
     ///
     /// A virtual audio cable makes the feedback path of SPEC §10 exact and
     /// silent: playback goes into the cable's input, capture comes out of its
-    /// output, so cnverc hears its own voice at full level with no speakers
+    /// output, so Volis hears its own voice at full level with no speakers
     /// involved. The test runs twice - with the gate off, to prove the loop is
     /// real and the recognizer would hear itself, and with the gate on, which
     /// must produce nothing at all.
     ///
     /// ```bash
-    /// CNVERC_TEST_MODELS=/abs/path/models     /// CNVERC_TEST_OUT_DEVICE="CABLE Input (VB-Audio Virtual Cable)"     /// CNVERC_TEST_IN_DEVICE="CABLE Output (VB-Audio Virtual Cable)"     /// cargo test --release -- --ignored --nocapture hearing_itself
+    /// VOLIS_TEST_MODELS=/abs/path/models     /// VOLIS_TEST_OUT_DEVICE="CABLE Input (VB-Audio Virtual Cable)"     /// VOLIS_TEST_IN_DEVICE="CABLE Output (VB-Audio Virtual Cable)"     /// cargo test --release -- --ignored --nocapture hearing_itself
     /// ```
     #[test]
     #[ignore = "needs a loopback audio device and a voice; see the doc comment"]
-    fn the_gate_stops_cnverc_hearing_itself() {
+    fn the_gate_stops_volis_hearing_itself() {
         use crate::audio;
         use crate::models::{self, Entry, Role};
         use crate::tts::{self, Voice};
@@ -551,9 +551,9 @@ mod tests {
         use std::path::{Path, PathBuf};
         use std::sync::mpsc::{sync_channel, RecvTimeoutError};
 
-        let models_root = std::env::var("CNVERC_TEST_MODELS").expect("CNVERC_TEST_MODELS");
-        let out_device = std::env::var("CNVERC_TEST_OUT_DEVICE").expect("CNVERC_TEST_OUT_DEVICE");
-        let in_device = std::env::var("CNVERC_TEST_IN_DEVICE").expect("CNVERC_TEST_IN_DEVICE");
+        let models_root = std::env::var("VOLIS_TEST_MODELS").expect("VOLIS_TEST_MODELS");
+        let out_device = std::env::var("VOLIS_TEST_OUT_DEVICE").expect("VOLIS_TEST_OUT_DEVICE");
+        let in_device = std::env::var("VOLIS_TEST_IN_DEVICE").expect("VOLIS_TEST_IN_DEVICE");
 
         let voices: Vec<crate::models::Engine> =
             models::discover(&Path::new(&models_root).join("tts"), Role::Tts)

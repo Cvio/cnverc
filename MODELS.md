@@ -1,10 +1,10 @@
 # The models: how they work, and how to add one
 
-cnverc doesn't understand speech by itself. It hands the work to **models**: files, trained
+Volis doesn't understand speech by itself. It hands the work to **models**: files, trained
 elsewhere, that each do one job very well. This page explains those jobs simply, then shows
-how cnverc finds its models and how to add new ones.
+how Volis finds its models and how to add new ones.
 
-- To set cnverc up, read [README.md](README.md). `setup.sh` downloads every model below for you.
+- To set Volis up, read [README.md](README.md). `setup.sh` downloads every model below for you.
 - For how the code uses the models, read [ARCHITECTURE.md](ARCHITECTURE.md).
 - To train a model for a dialect, read [DIALECTS.md](DIALECTS.md) and [lora.md](lora.md).
 
@@ -12,7 +12,7 @@ how cnverc finds its models and how to add new ones.
 
 ## 1. The four jobs, explained simply
 
-Think of cnverc as a small team of interpreters passing notes down a line:
+Think of Volis as a small team of interpreters passing notes down a line:
 
 ```mermaid
 flowchart LR
@@ -35,7 +35,7 @@ flowchart LR
 4. **The voice** (text-to-speech, *TTS*). It reads the translation aloud. Each voice speaks one
    language, and sometimes one accent: the Mexican Spanish voice sounds Mexican.
 
-Each model is just a set of files on disk. cnverc loads them into memory when you press
+Each model is just a set of files on disk. Volis loads them into memory when you press
 **Start**, and nothing is ever sent anywhere.
 
 ## 2. What's installed
@@ -56,14 +56,14 @@ with their own licences; check each one before you redistribute it.
 Why these translator and listener models were chosen is recorded in
 [TECHNICAL.md](TECHNICAL.md#choosing-the-translation-model).
 
-## 3. How cnverc finds its models: the folder is the index
+## 3. How Volis finds its models: the folder is the index
 
-There's no registry, database or download screen. cnverc looks in the `models` folder next to
+There's no registry, database or download screen. Volis looks in the `models` folder next to
 the program, and **whatever is there is what it has**:
 
 ```
-cnverc.exe
-cnverc.toml
+volis.exe
+volis.toml
 models/
   vad/silero_vad.onnx                    the ear: one file
   asr/<one folder per listener>/         engine.toml + its files
@@ -78,7 +78,7 @@ Rules that keep it simple:
 - **Adding a model** means dropping a folder in and pressing **Rescan models and devices** (or
   restarting). **Removing one** means moving its folder out.
 - `models/mt/` holds **exactly one** `.gguf`. Two is an error that asks you to remove one,
-  rather than cnverc guessing.
+  rather than Volis guessing.
 - Folders under `asr/` and `tts/` describe themselves in an **`engine.toml`**. A folder without
   one is skipped, with a warning in the log.
 
@@ -108,10 +108,10 @@ The `[files]` jobs depend on the backend:
 | `vits` | Piper voices | `model`, `tokens`, plus `data_dir` |
 
 Only the keys shown above are allowed. A misspelt key, an unknown backend, a missing file, or
-a variety cnverc doesn't know makes the model show as **broken** or **DISABLED** in
+a variety Volis doesn't know makes the model show as **broken** or **DISABLED** in
 `--report`, with the reason. It is never silently ignored.
 
-## 4. How cnverc picks a model
+## 4. How Volis picks a model
 
 **Listener:** the **Recognizer** setting in the window picks one for Take turns, Listen
 continuously and Paired. In Shared machine mode, each person has their own **Heard by** picker,
@@ -120,7 +120,7 @@ listing only listeners that know that person's language. Leave **Best match** if
 **Voice:** chosen from the language you translate into. Nothing to set, unless you want to:
 Shared machine mode has a voice picker per side.
 
-**When more than one model fits**, cnverc sorts them, and takes the first unless you choose:
+**When more than one model fits**, Volis sorts them, and takes the first unless you choose:
 
 1. **Tuned:** made for exactly the dialect you picked (for example *Spanish (Mexico)*).
 2. **General:** knows the language, with no dialect declared.
@@ -148,11 +148,11 @@ see [DIALECTS.md](DIALECTS.md).
 
 ## 5. Checking your models
 
-**`--report`** lists every model cnverc found, whether each file is there, what it's tuned for,
+**`--report`** lists every model Volis found, whether each file is there, what it's tuned for,
 and why anything is broken. Run it after any change:
 
 ```bash
-./target/release/cnverc.exe --report
+./target/release/volis.exe --report
 ```
 
 (On Linux, drop the `.exe`.) Every listener and voice should say `ok`.
@@ -167,7 +167,7 @@ sentence's length for that reason.
 ## 6. How to add a model
 
 After each recipe, run `--report` (it should say `ok`), then press **Start** and try a sentence.
-Make changes in `target/release/models/`, the copy cnverc actually runs from. The `models/`
+Make changes in `target/release/models/`, the copy Volis actually runs from. The `models/`
 folder in the repository holds only the `engine.toml` files, as templates.
 
 ### Add a voice
@@ -203,7 +203,7 @@ A listener of a *different* kind (not Whisper or Parakeet) needs code: see
    switch back.
 2. Put the new one in. It must be a **Qwen3** model in GGUF format: the prompt is written for
    Qwen's chat format.
-3. Restart cnverc.
+3. Restart Volis.
 
 The translator has no `engine.toml` yet, so it can't declare a dialect. That's planned for when
 a dialect-tuned translator exists.
@@ -213,7 +213,7 @@ a dialect-tuned translator exists.
 1. **A listener that knows it.** Whisper knows most languages; add the code to its
    `engine.toml`'s `languages` list if it's missing.
 2. **A voice that speaks it** (above).
-3. **Teach cnverc its name.** Add a row to the table in `src/varieties.rs`: the code, the name
+3. **Teach Volis its name.** Add a row to the table in `src/varieties.rs`: the code, the name
    the window shows, and the name written into the translation prompt. The window only offers
    languages in this table, and the translator refuses any code it doesn't know rather than
    guess. This is the one step that needs rebuilding (`./setup.sh`).
@@ -231,7 +231,7 @@ To train the tuned models themselves, see [DIALECTS.md](DIALECTS.md) and [lora.m
 
 ## 7. Memory
 
-All the models stay loaded while cnverc runs. Shared
+All the models stay loaded while Volis runs. Shared
 machine mode with two different Whisper listeners, or one Whisper used for two languages,
 holds an extra copy of Whisper: about 1 GB more. The log prints the memory in use after each
 listener loads (`memory in use after loading …`).

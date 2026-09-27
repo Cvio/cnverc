@@ -1,7 +1,7 @@
 //! The window (Milestone 5).
 //!
 //! Everything from the earlier milestones is reachable from here without
-//! touching `cnverc.toml` or the command line: the recognizer (populated from
+//! touching `volis.toml` or the command line: the recognizer (populated from
 //! discovery, disabled entries shown with what is missing), both languages,
 //! both audio devices, speech on or off, the half-duplex gate, the comparison
 //! harness, and a caption pane with a latency readout underneath.
@@ -9,7 +9,7 @@
 //! Milestone 6 adds the two modes of SPEC §8: continuous listening, and turns
 //! taken with a key. The turn key is taken out of the input before any widget
 //! runs, so it never also presses whatever button has focus, and a large
-//! indicator shows at a glance whether cnverc is ready, recording, or
+//! indicator shows at a glance whether Volis is ready, recording, or
 //! processing.
 //!
 //! Milestone 7 adds paired mode (SPEC §9): a peer panel showing this PC's
@@ -57,7 +57,7 @@ const METER_FLOOR_DB: f32 = -60.0;
 pub fn run(root: PathBuf, config: Config) -> Result<()> {
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
-            .with_title("cnverc")
+            .with_title("Volis")
             .with_inner_size([1000.0, 680.0])
             .with_min_inner_size([720.0, 480.0]),
         wgpu_options: eframe::egui_wgpu::WgpuConfiguration {
@@ -67,7 +67,7 @@ pub fn run(root: PathBuf, config: Config) -> Result<()> {
         ..Default::default()
     };
     eframe::run_native(
-        "cnverc",
+        "Volis",
         options,
         Box::new(move |cc| {
             install_rtl_font(&cc.egui_ctx);
@@ -82,7 +82,7 @@ pub fn run(root: PathBuf, config: Config) -> Result<()> {
 const RTL_FAMILY: &str = "rtl";
 
 /// Fonts with Arabic and Hebrew letters, tried in order. egui's built-in fonts
-/// have neither, and drew an Arabic translation as a row of boxes. cnverc
+/// have neither, and drew an Arabic translation as a row of boxes. Volis
 /// ships no fonts and downloads nothing, so it borrows one the system has:
 /// Segoe UI or Arial on Windows, Noto Sans Arabic or DejaVu Sans on Linux.
 fn rtl_font_candidates() -> Vec<PathBuf> {
@@ -188,7 +188,7 @@ fn graphics_setup() -> eframe::egui_wgpu::WgpuSetupCreateNew {
         // Wireshark's old copy, which cannot compile wgpu's shaders, and the
         // window failed with "Parent device is lost". Choosing FXC makes the
         // window independent of whatever else is installed, and needs no DLL
-        // beside cnverc.exe (SPEC §2.6). egui's few shaders compile quickly
+        // beside volis.exe (SPEC §2.6). egui's few shaders compile quickly
         // either way.
         setup
             .instance_descriptor
@@ -296,7 +296,7 @@ pub struct Session {
     pub floor: Option<Holder>,
     /// Why the last turn asked for did not happen. Cleared by the next one.
     pub floor_note: Option<String>,
-    /// Other cnverc PCs heard on the network.
+    /// Other Volis PCs heard on the network.
     pub discovered: Vec<Found>,
     /// Shared machine: whose turn is being recorded, worked on or spoken.
     /// Cleared when the turn is fully over.
@@ -632,7 +632,7 @@ pub fn take_turn_key(input: &mut egui::InputState, key: egui::Key) -> KeyEdges {
     edges
 }
 
-/// Whether the turn key is down, kept by cnverc itself, so that a held key is
+/// Whether the turn key is down, kept by Volis itself, so that a held key is
 /// one press however its repeats arrive. egui's own repeat marking is not
 /// relied on alone: depending on it is how the flapping above happened.
 #[derive(Debug, Default)]
@@ -747,7 +747,7 @@ impl App {
                 Some(named) => *key = named,
                 None => {
                     app.notice = Some(format!(
-                        "[shared].{side}_key = \"{name}\" is not a key cnverc knows; using {}",
+                        "[shared].{side}_key = \"{name}\" is not a key Volis knows; using {}",
                         key.name()
                     ))
                 }
@@ -757,7 +757,7 @@ impl App {
             Some(key) => app.turn_key = key,
             None => {
                 app.notice = Some(format!(
-                    "[mode].turn_key = \"{}\" is not a key cnverc knows; using Space",
+                    "[mode].turn_key = \"{}\" is not a key Volis knows; using Space",
                     app.config.mode.turn_key
                 ))
             }
@@ -947,7 +947,7 @@ impl App {
                     TurnStyle::Hold,
                     format!("Hold {key} while speaking"),
                 );
-                ui.weak("Change the key with [mode].turn_key in cnverc.toml.");
+                ui.weak("Change the key with [mode].turn_key in volis.toml.");
             });
         }
 
@@ -1160,7 +1160,7 @@ impl App {
         }
     }
 
-    /// The indicator of SPEC §8: whether cnverc is ready, recording or
+    /// The indicator of SPEC §8: whether Volis is ready, recording or
     /// processing, readable from across a desk. Colour and word both change,
     /// so neither has to be relied on alone.
     fn indicator(&self, ui: &mut egui::Ui) {
@@ -1498,7 +1498,7 @@ impl App {
                 )
                 .on_hover_text(
                     "Half-duplex. Turn this off only when using headphones: with speakers, \
-                     cnverc hears its own voice and transcribes it.",
+                     Volis hears its own voice and transcribes it.",
                 )
                 .changed();
 
@@ -1533,7 +1533,7 @@ impl App {
 
     fn top_bar(&mut self, ui: &mut egui::Ui) {
         ui.horizontal(|ui| {
-            ui.heading("cnverc");
+            ui.heading("Volis");
             ui.add_space(16.0);
 
             let (label, stopping) = match (&self.session.state, self.running()) {

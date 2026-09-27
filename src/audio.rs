@@ -176,7 +176,7 @@ pub fn spawn_capture(device_name: &str, out: SyncSender<Vec<f32>>) -> Result<Cap
         let dropped_chunks = dropped_chunks.clone();
         let name = name.clone();
         std::thread::Builder::new()
-            .name("cnverc-capture".to_string())
+            .name("volis-capture".to_string())
             .spawn(move || {
                 capture_thread(
                     device,
@@ -221,7 +221,7 @@ pub fn spawn_capture(device_name: &str, out: SyncSender<Vec<f32>>) -> Result<Cap
 }
 
 /// Empty name = the system default. A named device that is not present is an
-/// error naming what was asked for; cnverc never quietly picks another one.
+/// error naming what was asked for; Volis never quietly picks another one.
 fn select_input_device(device_name: &str) -> Result<Device> {
     let host = cpal::default_host();
     if device_name.trim().is_empty() {

@@ -81,11 +81,11 @@ pub enum WireError {
     #[error("a message that is not UTF-8 text arrived")]
     NotUtf8,
     #[error(
-        "the other side speaks protocol version {0}; this cnverc speaks version {PROTO}. \
-         Use the same cnverc version on both PCs."
+        "the other side speaks protocol version {0}; this Volis speaks version {PROTO}. \
+         Use the same Volis version on both PCs."
     )]
     UnknownProto(u64),
-    #[error("a message cnverc does not understand arrived: {0}")]
+    #[error("a message Volis does not understand arrived: {0}")]
     Malformed(String),
 }
 

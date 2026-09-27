@@ -1,10 +1,10 @@
-# cnverc
+# Volis
 
-cnverc is a live interpreter for two people who don't share a language. One person speaks, for
-example in Spanish. cnverc writes down what they said, translates it into English, shows both on
+Volis is a live interpreter for two people who don't share a language. One person speaks, for
+example in Spanish. Volis writes down what they said, translates it into English, shows both on
 screen, and says the English out loud. It works the other way round too.
 
-Everything happens on your own computer. cnverc **never uses the internet**. Once it's set up,
+Everything happens on your own computer. Volis **never uses the internet**. Once it's set up,
 you can unplug the network and it keeps working.
 
 **This page gets you from nothing to talking.** Each step ends with ✅ what you should see, so
@@ -36,13 +36,13 @@ You'll paste a few commands into a terminal. Copy each one, paste it, and press 
    `LLVM-<version>-win64.exe`. Run it and choose **Add LLVM to the system PATH for all users**.
 4. **Install Rust.** Download `rustup-init.exe` from <https://rustup.rs>, run it, and press
    **Enter** for the defaults. Then **close Git Bash and open it again.**
-5. **Get cnverc** into a short folder (long paths break the build):
+5. **Get Volis** into a short folder (long paths break the build):
 
    ```bash
-   cd /c/ && git clone https://github.com/Cvio/cnverc.git && cd cnverc
+   cd /c/ && git clone https://github.com/Cvio/cnverc.git volis && cd volis
    ```
 
-   In a new Git Bash window later, type `cd /c/cnverc` first.
+   In a new Git Bash window later, type `cd /c/volis` first.
 6. **Check your tools:**
 
    ```bash
@@ -51,7 +51,7 @@ You'll paste a few commands into a terminal. Copy each one, paste it, and press 
 
    ✅ Every line says `OK`. If one says `MISSING`, do what the line under it says and run it
    again.
-7. **Build cnverc and download its models** (10–20 minutes, plus about 2.4 GB of downloads):
+7. **Build Volis and download its models** (10–20 minutes, plus about 2.4 GB of downloads):
 
    ```bash
    ./setup.sh
@@ -59,13 +59,13 @@ You'll paste a few commands into a terminal. Copy each one, paste it, and press 
 
    ✅ It ends with `Everything is in place`. If it stops partway, run it again: it carries on
    where it left off.
-8. **Start cnverc:**
+8. **Start Volis:**
 
    ```bash
-   ./target/release/cnverc.exe
+   ./target/release/volis.exe
    ```
 
-   Or double-click `cnverc.exe` in `C:\cnverc\target\release` (right-click it › **Send to ›
+   Or double-click `volis.exe` in `C:\volis\target\release` (right-click it › **Send to ›
    Desktop** makes a shortcut). A black log window opens behind it; you can ignore it.
 
 Now go to [First run](#first-run).
@@ -88,10 +88,10 @@ Tested on Ubuntu 26.04; any Ubuntu from 25.04 on should work.
    curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
    ```
 
-3. **Get cnverc:**
+3. **Get Volis:**
 
    ```bash
-   cd ~ && git clone https://github.com/Cvio/cnverc.git && cd cnverc
+   cd ~ && git clone https://github.com/Cvio/cnverc.git volis && cd volis
    ```
 
 4. **Build the speech library** (once; about an hour):
@@ -102,9 +102,9 @@ Tested on Ubuntu 26.04; any Ubuntu from 25.04 on should work.
 
    ✅ It ends with `The speech library is built`.
 5. **Check your tools:** `./check-setup.sh`. ✅ Every line says `OK`.
-6. **Build cnverc and download its models:** `./setup.sh`. ✅ It ends with
+6. **Build Volis and download its models:** `./setup.sh`. ✅ It ends with
    `Everything is in place`.
-7. **Start cnverc:** `./target/release/cnverc` (it needs a desktop session).
+7. **Start Volis:** `./target/release/volis` (it needs a desktop session).
 
 ---
 
@@ -119,7 +119,7 @@ Tested on Ubuntu 26.04; any Ubuntu from 25.04 on should work.
 
 ✅ You see your sentence and its translation, and hear the translation spoken.
 
-cnverc remembers your choices, so you only do this once.
+Volis remembers your choices, so you only do this once.
 
 ---
 
@@ -143,7 +143,7 @@ Untick **Speak translations** for captions only.
 
 ## Updating
 
-Close cnverc, then from the `cnverc` folder:
+Close Volis, then from the `volis` folder:
 
 ```bash
 git pull && ./setup.sh
@@ -159,9 +159,9 @@ Your settings are kept.
 |---|---|
 | A `MISSING` line from `check-setup.sh` or `setup.sh` | Do what the line under it says, then run it again |
 | `setup.sh` stopped partway, or a download failed | Run `./setup.sh` again |
-| `Access is denied` while building | cnverc is still open. Close it and try again |
+| `Access is denied` while building | Volis is still open. Close it and try again |
 | The level meter doesn't move when you talk | Choose another microphone, or unmute it in your system's sound settings |
-| cnverc translates its own voice | Tick **Mute the microphone while speaking**, or use a headset |
+| Volis translates its own voice | Tick **Mute the microphone while speaking**, or use a headset |
 
 Anything else: the full table is in
 [USE-CASES.md → When something goes wrong](USE-CASES.md#when-something-goes-wrong). Asking for

@@ -1,4 +1,4 @@
-//! Every path in `cnverc` derives from the executable's own location.
+//! Every path in `Volis` derives from the executable's own location.
 //!
 //! SPEC §5: never the current working directory, never `%APPDATA%`, never the
 //! `dirs`/`directories` crates. Double-clicking from Explorer and launching
@@ -13,7 +13,7 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
 
-/// The directory containing `cnverc.exe`.
+/// The directory containing `volis.exe`.
 pub fn app_root() -> Result<PathBuf> {
     let exe = std::env::current_exe()?.canonicalize()?;
     let root = exe.parent().context("exe has no parent")?;
@@ -21,7 +21,7 @@ pub fn app_root() -> Result<PathBuf> {
 }
 
 /// `canonicalize()` on Windows hands back a verbatim path (`\\?\C:\...`). It is
-/// correct but unreadable, and every error message in cnverc quotes an
+/// correct but unreadable, and every error message in Volis quotes an
 /// absolute path back to the user (SPEC §14), so the prefix is dropped when
 /// what remains is an ordinary drive path. Anything else passes through
 /// untouched, including UNC paths, where the prefix is load-bearing.
@@ -41,9 +41,9 @@ fn strip_verbatim(path: &Path) -> PathBuf {
     }
 }
 
-/// `<root>/cnverc.toml` - user selections (SPEC §7).
+/// `<root>/volis.toml` - user selections (SPEC §7).
 pub fn config_file(root: &Path) -> PathBuf {
-    root.join("cnverc.toml")
+    root.join("volis.toml")
 }
 
 /// `<root>/models` - the model tree (SPEC §5).
@@ -90,20 +90,20 @@ mod tests {
 
     #[test]
     fn a_verbatim_unc_path_keeps_its_prefix() {
-        let unc = Path::new(r"\\?\UNC\server\share\cnverc");
+        let unc = Path::new(r"\\?\UNC\server\share\volis");
         assert_eq!(strip_verbatim(unc), unc.to_path_buf());
     }
 
     #[test]
     fn an_ordinary_path_is_untouched() {
-        let plain = Path::new("/opt/cnverc");
+        let plain = Path::new("/opt/volis");
         assert_eq!(strip_verbatim(plain), plain.to_path_buf());
     }
 
     #[test]
     fn every_location_hangs_off_the_root_it_is_given() {
-        let root = Path::new(r"X:\somewhere\cnverc");
-        assert_eq!(config_file(root), root.join("cnverc.toml"));
+        let root = Path::new(r"X:\somewhere\volis");
+        assert_eq!(config_file(root), root.join("volis.toml"));
         assert!(asr_dir(root).starts_with(root));
         assert!(tts_dir(root).starts_with(root));
         assert!(mt_dir(root).starts_with(root));

@@ -1,11 +1,11 @@
-//! `cnverc.toml` - user selections only, by directory name (SPEC §7).
+//! `volis.toml` - user selections only, by directory name (SPEC §7).
 //!
 //! The file holds exactly the keys §7 lists and nothing else. Models are
 //! referenced by the name of their directory under `models/`; no paths, no
 //! hashes, no ids.
 //!
 //! A key left out of a section takes its §7 default: the file is meant to be
-//! written by hand, and a missing line should not stop cnverc starting. A key
+//! written by hand, and a missing line should not stop Volis starting. A key
 //! that is not in §7 is still an error, because it is almost always a typo.
 
 use std::path::Path;
@@ -199,7 +199,7 @@ impl Default for Peer {
 }
 
 impl Config {
-    /// Read `cnverc.toml`. A missing file is not an error - the defaults in
+    /// Read `volis.toml`. A missing file is not an error - the defaults in
     /// §7 apply - but the absolute path that was tried is reported so the user
     /// knows where to create it. A malformed file *is* an error: silently
     /// falling back to defaults would hide the user's selections.
@@ -219,7 +219,7 @@ impl Config {
     /// Write back the selections the window can change, leaving everything
     /// else in the file as the user wrote it.
     ///
-    /// The file is edited rather than regenerated: `cnverc.toml` is meant to
+    /// The file is edited rather than regenerated: `volis.toml` is meant to
     /// be read and hand-edited (SPEC §7), and a save that stripped its comments
     /// or reordered it would punish the person who did.
     pub fn save_selections(&self, path: &Path) -> Result<()> {
@@ -233,7 +233,7 @@ impl Config {
             }
         };
         // A file that does not parse is not overwritten: whatever is wrong with
-        // it is the user's to see, not cnverc' to erase.
+        // it is the user's to see, not Volis' to erase.
         let mut doc: toml_edit::DocumentMut = existing
             .parse()
             .with_context(|| format!("failed to parse {}; not overwriting it", path.display()))?;
@@ -330,7 +330,7 @@ impl Config {
     }
 }
 
-/// The comments written above the voice keys when cnverc adds them, because
+/// The comments written above the voice keys when Volis adds them, because
 /// which voice each key means is easy to get backwards.
 const VOICE_NOTE_LEFT: &str = "# left_voice speaks what the LEFT person said, so it is a voice in the RIGHT
                                # person's language. A folder name under models/tts/; empty = first match.
@@ -443,7 +443,7 @@ discovery = true
 
     #[test]
     fn saving_selections_keeps_comments_and_every_other_key() {
-        let path = std::env::temp_dir().join(format!("cnverc-save-{}.toml", std::process::id()));
+        let path = std::env::temp_dir().join(format!("volis-save-{}.toml", std::process::id()));
         let original = "# my notes about this rig\n\
                         [asr]\n\
                         engine = \"parakeet\"   # the fast one\n\
@@ -483,7 +483,7 @@ discovery = true
 
     #[test]
     fn a_malformed_file_is_never_overwritten() {
-        let path = std::env::temp_dir().join(format!("cnverc-bad-{}.toml", std::process::id()));
+        let path = std::env::temp_dir().join(format!("volis-bad-{}.toml", std::process::id()));
         std::fs::write(&path, "[asr\nengine = ").expect("write");
         let result = Config::default().save_selections(&path);
         let after = std::fs::read_to_string(&path).expect("read back");
@@ -554,7 +554,7 @@ right_asr = \"whisper-es\"
 
     #[test]
     fn saving_adds_the_shared_section_with_the_voice_keys_explained() {
-        let path = std::env::temp_dir().join(format!("cnverc-shared-{}.toml", std::process::id()));
+        let path = std::env::temp_dir().join(format!("volis-shared-{}.toml", std::process::id()));
         std::fs::write(&path, "[asr]\nengine = \"whisper\"\n").expect("write");
 
         let (mut config, _) = Config::load(&path).expect("load");

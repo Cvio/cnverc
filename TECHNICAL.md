@@ -1,6 +1,6 @@
-# cnverc: technical notes
+# Volis: technical notes
 
-Why cnverc is built the way it is: design decisions, measurements, and the build internals
+Why Volis is built the way it is: design decisions, measurements, and the build internals
 that are easy to break. Read this before changing the build or reversing a decision.
 
 - How the code fits together: [ARCHITECTURE.md](ARCHITECTURE.md).
@@ -18,7 +18,7 @@ that are easy to break. Read this before changing the build or reversing a decis
   half-duplex gate never eats a turn.
 - **The turn key** is removed from the frame's events before any widget runs
   (`gui::take_turn_key`), so Space never also presses a focused button. egui's `keys_down` is
-  left alone, because egui uses it to mark auto-repeats. cnverc also keeps its own key state
+  left alone, because egui uses it to mark auto-repeats. Volis also keeps its own key state
   (`gui::TurnKey`), so a held key counts as one press.
 - **The voice is chosen by language**, not by a config key: §7 defines none, and §9 says the
   language decides which voice speaks. Solo, that is the target language. Paired, it is each
@@ -36,7 +36,7 @@ that are easy to break. Read this before changing the build or reversing a decis
 - The window renders with **DirectX 12** on Windows. The Vulkan backend logged loader errors
   at startup. It uses **FXC**, the shader compiler built into Windows: wgpu's default takes any
   `dxcompiler.dll` on PATH first, and Wireshark's old copy made the window fail with "Parent
-  device is lost". With FXC, no DLL has to sit beside `cnverc.exe`.
+  device is lost". With FXC, no DLL has to sit beside `volis.exe`.
 
 ## What the translation stage refuses
 
@@ -68,7 +68,7 @@ second.
 
 The prompt is written for Qwen's chat format, so the model in `models/mt/` must be a Qwen3.
 `models/mt/` holds exactly one `.gguf`. Two files is an error that asks you to remove one,
-rather than cnverc choosing for you. There is no config key naming the file, because §7
+rather than Volis choosing for you. There is no config key naming the file, because §7
 defines none; the filesystem is the index.
 
 Qwen's own GGUF repositories publish only Q8_0, which is why the Q4_K_M comes from unsloth.
@@ -96,7 +96,7 @@ depends on Windows system DLLs only:
 kernel32.dll  advapi32.dll  ole32.dll  oleaut32.dll  dbghelp.dll  setupapi.dll  dxgi.dll  ntdll.dll
 ```
 
-Re-check with `dumpbin -dependents cnverc.exe` whenever a dependency is added. Don't fix a
+Re-check with `dumpbin -dependents volis.exe` whenever a dependency is added. Don't fix a
 RuntimeLibrary mismatch by switching sherpa to its dynamic build.
 
 ### Linux: shared sherpa-onnx
@@ -104,7 +104,7 @@ RuntimeLibrary mismatch by switching sherpa to its dynamic build.
 Linux doesn't use the static build. The prebuilt `sherpa-onnx-v1.13.8-linux-x64-static-lib`
 archive bundles an onnxruntime (`1.28.2-glibc2_17`) that aborts with `free(): invalid pointer`
 the moment a model session is created, on Ubuntu 26.04 with GCC 15 and glibc 2.43. It isn't
-cnverc's code: sherpa-onnx's own `sherpa-onnx-offline`, built from source with the same bundled
+Volis's code: sherpa-onnx's own `sherpa-onnx-offline`, built from source with the same bundled
 onnxruntime, crashed identically at "Creating recognizer", for Parakeet and Whisper alike. Built
 as a shared library against Ubuntu's `libonnxruntime` 1.23, every model loads and runs: Silero
 VAD, both recognizers and both Piper voices.
@@ -123,7 +123,7 @@ How it's wired, all of it Linux-only so the Windows build is untouched:
 - The build script copies `libsherpa-onnx-c-api.so` next to the executable, but a dependency's
   `rustc-link-arg` never reaches the final binary, so the rpath it asks for is lost.
   `.cargo/config.toml` adds `-Wl,-rpath,$ORIGIN` under `[target.'cfg(target_os = "linux")']` so
-  `cnverc` finds the library in its own folder.
+  `volis` finds the library in its own folder.
 - The shared link asks for `-lonnxruntime`. If the `SHERPA_ONNX_LIB_DIR` folder still holds a
   `libonnxruntime.a`, left over from an earlier static build of sherpa-onnx, the linker finds it
   there before the system `.so` and links the crashing library again. Move it out.
@@ -131,11 +131,11 @@ How it's wired, all of it Linux-only so the Windows build is untouched:
 Check the result with:
 
 ```bash
-ldd target/release/cnverc | grep -E "onnx|sherpa|not found"
+ldd target/release/volis | grep -E "onnx|sherpa|not found"
 ```
 
 `libsherpa-onnx-c-api.so` should resolve to `target/release/`, and `libonnxruntime.so.1.23` to
-`/usr/lib/x86_64-linux-gnu/`. `readelf -d target/release/cnverc | grep RUNPATH` should show
+`/usr/lib/x86_64-linux-gnu/`. `readelf -d target/release/volis | grep RUNPATH` should show
 `$ORIGIN`.
 
 This means the Linux build depends on the system `libonnxruntime` package, so it isn't

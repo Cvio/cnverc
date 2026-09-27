@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# check-setup.sh - is this PC ready to build cnverc?
+# check-setup.sh - is this PC ready to build Volis?
 #
 # Checks the tools the build needs and says, for anything missing, exactly
 # what to do about it. It changes nothing on your PC.
@@ -44,7 +44,7 @@ have_lib() {
     compgen -G "/usr/lib/llvm-*/lib/$1.so*" >/dev/null
 }
 
-echo "Checking what cnverc needs to build ($os)"
+echo "Checking what Volis needs to build ($os)"
 echo
 
 # --- Both ---------------------------------------------------------------------
@@ -64,7 +64,7 @@ if command -v cargo >/dev/null 2>&1; then
   if [ "$major" -gt 1 ] || { [ "$major" -eq 1 ] && [ "$minor" -ge 95 ]; }; then
     ok "Rust (cargo $version)"
   else
-    bad "Rust is $version; cnverc needs 1.95 or newer" "rustup update"
+    bad "Rust is $version; Volis needs 1.95 or newer" "rustup update"
   fi
 else
   if [ "$os" = windows ]; then
@@ -115,14 +115,14 @@ if [ "$os" = windows ]; then
   here=$(pwd -W 2>/dev/null || pwd)
   if [ "${#here}" -gt 80 ]; then
     bad "This folder's path is too long for the build (${#here} characters): $here" \
-        "Move or clone cnverc into a short folder, such as C:\\cnverc or D:\\projects\\cnverc (80 characters at most)"
+        "Move or clone Volis into a short folder, such as C:\\volis or D:\\projects\\volis (80 characters at most)"
   else
     ok "Folder path is short enough (${#here} characters)"
   fi
   case "$here" in
     *[Tt]emp/*|*[Tt]emp\\*|*[Tt]mp/*|*[Tt]mp\\*)
       note "This folder is inside a Temp folder, which the Microsoft build tools warn against." \
-           "Prefer a normal folder, such as C:\\cnverc or D:\\projects\\cnverc" ;;
+           "Prefer a normal folder, such as C:\\volis or D:\\projects\\volis" ;;
   esac
 
   if [ -n "${SHERPA_ONNX_LIB_DIR:-}" ] && [ ! -d "${SHERPA_ONNX_LIB_DIR}" ]; then
@@ -172,7 +172,7 @@ if [ -n "$free_kb" ]; then
     ok "Disk space (${free_gb} GB free here)"
   else
     note "Only ${free_gb} GB free here. The build and models need about 12 GB." \
-         "Free some space, or clone cnverc onto a drive with more room"
+         "Free some space, or clone Volis onto a drive with more room"
   fi
 fi
 
@@ -189,7 +189,7 @@ if [ -n "$mem_gb" ]; then
   elif [ "$mem_gb" -ge 8 ]; then
     ok "Memory (${mem_gb} GB; enough, though Shared machine mode with Whisper turbo is happier with 16)"
   else
-    note "Memory is ${mem_gb} GB. cnverc needs about 8 GB to run all its models."
+    note "Memory is ${mem_gb} GB. Volis needs about 8 GB to run all its models."
   fi
 fi
 
@@ -198,4 +198,4 @@ if [ "$missing" -ne 0 ]; then
   echo "Something is missing. Do what each MISSING line says, then run this again."
   exit 1
 fi
-echo "Everything cnverc needs to build is here."
+echo "Everything Volis needs to build is here."

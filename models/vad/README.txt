@@ -1,5 +1,5 @@
 The voice detector goes here. It notices when someone starts and stops
-talking, so cnverc knows where each sentence begins and ends.
+talking, so Volis knows where each sentence begins and ends.
 
     silero_vad.onnx
 

@@ -1,9 +1,9 @@
-# Using cnverc: situations and how to handle them
+# Using Volis: situations and how to handle them
 
-The [README](README.md) gets cnverc set up and running. This guide starts from the other end:
+The [README](README.md) gets Volis set up and running. This guide starts from the other end:
 **you're in a situation, so what do you set up, and how does the conversation go?** It ends
 with the [full troubleshooting table](#when-something-goes-wrong) and a
-[glossary](#words-used-in-cnverc).
+[glossary](#words-used-in-volis).
 
 Each use case follows the same pattern: who it's for, what you need, how to set it up, how the
 conversation goes, what good looks like, what usually goes wrong, and its limits.
@@ -23,14 +23,14 @@ conversation goes, what good looks like, what usually goes wrong, and its limits
 
 A few things are true in every case:
 
-- **cnverc translates between two languages at a time.** Out of the box those are English and
+- **Volis translates between two languages at a time.** Out of the box those are English and
   Spanish. Other languages need a voice and a recognizer that know them; see
   [MODELS.md → Add a language](MODELS.md#add-a-language).
 - **Short, complete sentences work best.** Say one or two sentences per turn, and pause
   briefly before you start.
 - **It takes a second or three** from the end of a sentence to hearing the translation. Leave
   that gap, and it feels like talking through an interpreter.
-- **Check the result before relying on it.** cnverc shows what it heard and what it
+- **Check the result before relying on it.** Volis shows what it heard and what it
   translated. For anything important (a dose, an address, a price), read the screen, not just
   the voice.
 
@@ -49,7 +49,7 @@ laptop.
 - **Shared machine** mode.
 
 **Setting up** (once):
-1. Start cnverc. Under **Mode**, choose **Shared machine**.
+1. Start Volis. Under **Mode**, choose **Shared machine**.
 2. Above the columns, set **Left person** to the language of whoever sits on the left, and
    **Right person** to the other. Match the screen to where people actually sit: left is left.
    If someone speaks a regional variety, pick it under **Variety** (for example *Spanish
@@ -131,7 +131,7 @@ clearly.
 person hears the other's words in their own language from their own laptop.
 
 **What you need:**
-- Two PCs with cnverc, on the same network: Wi-Fi, a router with no internet, or one Ethernet
+- Two PCs with Volis, on the same network: Wi-Fi, a router with no internet, or one Ethernet
   cable between them.
 - Speakers on both.
 - **Pair with another PC**, and **Take turns** on both.
@@ -140,7 +140,7 @@ person hears the other's words in their own language from their own laptop.
 1. On each PC, set the languages **for that PC's person**. On Ana's (Spanish): Speaker's
    language *Spanish*, Translate into *English*. On Ben's (English): the other way round.
 2. On both: tick **Pair with another PC**, choose **Take turns**, press **Start**. The first
-   time, allow cnverc through the Windows firewall on **Private networks**.
+   time, allow Volis through the Windows firewall on **Private networks**.
 3. On either PC: type the other PC's address (shown under **This PC** on it), or click it
    under **Found on this network**, and press **Connect**.
 4. Both show **Paired with …** at the top.
@@ -174,7 +174,7 @@ speakers, and nobody's words come back round in a loop.
 or someone in another part of a building on the same network.
 
 **What you need:** as in use case 3, but a **headset on each PC** is better, since each person
-hears only their PC. The same network is needed, since cnverc never uses the internet.
+hears only their PC. The same network is needed, since Volis never uses the internet.
 
 **Setting up and the conversation:** exactly as in [use case 3](#3-two-pcs-in-the-same-room).
 Because the rooms are separate, you can also try **Listen continuously** (use case 5).
@@ -183,7 +183,7 @@ Because the rooms are separate, you can also try **Listen continuously** (use ca
 - **The other PC isn't found.** Guest Wi-Fi networks often stop devices seeing each other.
   Use the main network, or type the address shown on the other PC.
 
-**Limits:** both PCs must be on the same local network. cnverc doesn't work across the
+**Limits:** both PCs must be on the same local network. Volis doesn't work across the
 internet, by design.
 
 ---
@@ -196,7 +196,7 @@ a headset.
 **What you need:** two paired PCs, as in use case 3, a **headset on each**, and **Listen
 continuously** on both.
 
-**Setting up:** as in use case 3, but choose **Listen continuously**. cnverc shows a red
+**Setting up:** as in use case 3, but choose **Listen continuously**. Volis shows a red
 **Headsets required** warning the whole time. That's expected.
 
 **The conversation:** just talk, pausing briefly at the end of each sentence. Each pause sends
@@ -208,7 +208,7 @@ its own person.
 
 **When it goes wrong:**
 - **Sentences cut in half.** You paused mid-sentence. Pause only at the end, or raise
-  `min_silence_ms` under `[vad]` in `cnverc.toml` (for example, to 800).
+  `min_silence_ms` under `[vad]` in `volis.toml` (for example, to 800).
 - **Background noise becomes words.** Continuous mode translates anything it hears. Use a
   headset with a close microphone, or switch back to Take turns.
 
@@ -235,18 +235,18 @@ without headsets on a single PC.
 
 **Who and where:** field work, a site with no connection, or a policy of no internet at all.
 
-**What you need:** cnverc set up on a PC **with** internet first (the README's setup). After
+**What you need:** Volis set up on a PC **with** internet first (the README's setup). After
 that, it never needs internet.
 
 **On Windows, to use another PC with no internet:**
-1. On the PC where you set cnverc up, copy these from its `target\release\` folder onto a USB
+1. On the PC where you set Volis up, copy these from its `target\release\` folder onto a USB
    stick, into one folder:
    ```
-   cnverc.exe
-   cnverc.toml
+   volis.exe
+   volis.toml
    models\
    ```
-2. On the other PC, put that folder anywhere and double-click `cnverc.exe`. Nothing needs
+2. On the other PC, put that folder anywhere and double-click `volis.exe`. Nothing needs
    installing: no Visual C++ runtime, no DirectX files.
 
 **Two laptops, no network at all:** connect them with an ordinary Ethernet cable, pair them as
@@ -261,12 +261,12 @@ on it. See the README.
 
 ## 8. "Which recognizer hears me best?" and "Why was that wrong?"
 
-**Who and where:** you're setting cnverc up for a particular person, or something keeps coming
+**Who and where:** you're setting Volis up for a particular person, or something keeps coming
 out wrong.
 
 **Which recognizer suits a voice:**
 1. In the window, tick **Compare recognizers** and press **Start**. Or, in a terminal:
-   `./target/release/cnverc.exe --listen --compare`.
+   `./target/release/volis.exe --listen --compare`.
 2. Speak normally for a minute. Each installed recognizer writes down the same audio, side by
    side, with how long it took.
 3. Pick the one that gets that person's words right most often, and set it as the
@@ -274,7 +274,7 @@ out wrong.
    differ.
 
 **Why a sentence came out wrong:**
-1. Run `./target/release/cnverc.exe --listen --wav --seconds 60` and say the sentence again.
+1. Run `./target/release/volis.exe --listen --wav --seconds 60` and say the sentence again.
 2. Play back the file it saved in `target\release\logs\segments\`.
    - **The recording itself is bad** (cut off, quiet, noisy): it's the microphone or where you
      paused. Try another microphone, or leave a pause before speaking.
@@ -312,28 +312,28 @@ them.
 | What you see | What to do |
 |---|---|
 | `check-setup.sh` says `MISSING` | Do what the line under it says, then run the check again |
-| "This folder's path is too long for the build" | Move the `cnverc` folder somewhere short, such as `C:\cnverc`, and run `./setup.sh` there |
-| `setup.sh` says cnverc is running | Close the cnverc window, then run `./setup.sh` again |
+| "This folder's path is too long for the build" | Move the `volis` folder somewhere short, such as `C:\volis`, and run `./setup.sh` there |
+| `setup.sh` says Volis is running | Close the Volis window, then run `./setup.sh` again |
 | A download failed | Run `./setup.sh` again; it retries only what's missing |
-| `Access is denied (os error 5)` while building | cnverc is still running. Close it and build again |
+| `Access is denied (os error 5)` while building | Volis is still running. Close it and build again |
 | The build fails mentioning `libclang` or `clang` | Install LLVM (README, Windows step 3) and open a new Git Bash |
-| The window doesn't open | Run cnverc from Git Bash and read the last lines it prints. Include them if you ask for help |
+| The window doesn't open | Run Volis from Git Bash and read the last lines it prints. Include them if you ask for help |
 | **Linux:** `free(): invalid pointer` when starting | The speech library was built wrongly. Run `./build-sherpa-linux.sh --rebuild`, then `./setup.sh` |
 | **Linux:** `ALSA lib … Unknown PCM` lines | Harmless; ignore them. If no microphone is listed at all: `sudo apt install libasound2-plugins` |
 | No microphone or speakers listed | Plug them in and click **Rescan models and devices** |
 | The level meter doesn't move when you talk | The wrong microphone is chosen, or it's muted in Windows' sound settings |
 | "Nothing recognised in … ms of speech" | The microphone heard sound but no words. Speak closer, or choose another microphone |
 | The first word goes missing | Pause for a moment after pressing the key, before you speak |
-| cnverc translates its own voice | Tick **Mute the microphone while speaking**, or use a headset |
+| Volis translates its own voice | Tick **Mute the microphone while speaking**, or use a headset |
 | "No voice installed for …" | Run `./setup.sh` again; it downloads missing voices |
 | The voice has the wrong accent | Pick the right **Variety** under the language, or choose the voice in Shared mode's voice picker |
-| "Not translated: …" | cnverc refused a translation it didn't trust. Say it again, more simply |
+| "Not translated: …" | Volis refused a translation it didn't trust. Say it again, more simply |
 | Shared machine: a key does nothing | Read that person's column: it says why. If blank, click outside any text box |
 | Shared machine: a column shows a problem with its recognizer | Set that column's **Heard by** to *Whisper large-v3-turbo* |
 | Paired: "Nothing is listening at …" | On the other PC, tick **Pair with another PC**, press **Start**, and check the address |
 | Paired: "No answer from … within 4 s" | A firewall is blocking. On the PC not being reached: **Settings › Network & internet**, choose the network, set **Network profile type** to **Private** |
 | Paired: "There is no route to …" | The PCs aren't on the same network, or the address is mistyped |
-| Paired: refused because of a protocol version | The two PCs run different versions of cnverc. Update both (README, "Updating") |
+| Paired: refused because of a protocol version | The two PCs run different versions of Volis. Update both (README, "Updating") |
 | A sentence comes out wrong | See [use case 8](#8-which-recognizer-hears-me-best-and-why-was-that-wrong) |
 
 Asking for help? Include what you did, what you saw, and the newest file in
@@ -341,18 +341,18 @@ Asking for help? Include what you did, what you saw, and the newest file in
 
 ---
 
-## Words used in cnverc
+## Words used in Volis
 
 | Word | Meaning |
 |---|---|
-| **Recognizer** | The model that turns speech into text. cnverc comes with two: Whisper and Parakeet. See [MODELS.md](MODELS.md) |
+| **Recognizer** | The model that turns speech into text. Volis comes with two: Whisper and Parakeet. See [MODELS.md](MODELS.md) |
 | **Translator** | The model that translates the text (Qwen3) |
 | **Voice** | The model that speaks the translation aloud (Piper voices) |
 | **Variety** | A regional form of a language, such as Spanish (Mexico). Optional; see [MODELS.md](MODELS.md#dialects-varieties-in-plain-words) |
 | **Turn** | One stretch of talking, from pressing your key to pressing it again |
 | **Floor** | In paired mode, the right to talk. Only one PC has it at a time |
-| **Mute the microphone while speaking** | Also called half-duplex: the microphone is ignored while cnverc speaks, so it doesn't hear itself |
-| **`cnverc.toml`** | The settings file next to the program. The window saves it for you |
+| **Mute the microphone while speaking** | Also called half-duplex: the microphone is ignored while Volis speaks, so it doesn't hear itself |
+| **`volis.toml`** | The settings file next to the program. The window saves it for you |
 | **`models/`** | The folder next to the program that holds every model, one folder each |
 | **`engine.toml`** | A small file in each model's folder saying what the model is and which files it uses |
-| **`--report`** | `cnverc --report` lists every model cnverc found, and anything missing |
+| **`--report`** | `volis --report` lists every model Volis found, and anything missing |

@@ -1,4 +1,4 @@
-# CLAUDE.md - `cnverc`
+# CLAUDE.md - `volis`
 
 `SPEC.md` is the build specification. Read it before changing anything. This file exists so
 the constraints below survive into sessions that have not read it.
@@ -18,7 +18,7 @@ loses. If you believe one of these is wrong, stop and say so rather than working
 1. **The application must never require, attempt, or depend on internet access.** No model
    downloads, no telemetry, no update checks, no license checks, no cloud inference, no
    public DNS lookups, no CDN fetches, no crash reporting. If a required model file is absent,
-   `cnverc` prints the exact absolute path it expected and exits non-zero. It does not offer
+   `volis` prints the exact absolute path it expected and exits non-zero. It does not offer
    to fetch it.
 
    **Local network sockets are explicitly permitted and required** for paired mode (SPEC §9):
@@ -34,7 +34,7 @@ loses. If you believe one of these is wrong, stop and say so rather than working
 
 2. **No separate services.** No Ollama, no `localhost:11434`, no sidecar process, no Docker,
    no external inference server. Every model runs in-process. (The peer listener in SPEC §9 is
-   part of `cnverc` itself, not a separate service.)
+   part of `volis` itself, not a separate service.)
 
 3. **No JavaScript toolchain.** No `package.json`, no `node_modules`, no npm, no bundler,
    anywhere in the repository. The GUI is native Rust (SPEC §4).
@@ -152,7 +152,7 @@ For the same reason `llama-cpp-2` is built without its default `openmp` feature.
 library (`Cargo.toml` splits the dependency by target, so Windows still gets the static build).
 The prebuilt static Linux archive's onnxruntime aborts with `free(): invalid pointer` as soon
 as a model session is created; sherpa-onnx's own `sherpa-onnx-offline` crashed the same way,
-so it is not cnverc's code. The build needs `SHERPA_ONNX_LIB_DIR` pointing at a sherpa-onnx
+so it is not Volis's code. The build needs `SHERPA_ONNX_LIB_DIR` pointing at a sherpa-onnx
 v1.13.8 built with `BUILD_SHARED_LIBS=ON` against the system `libonnxruntime` (README, "Setting
 up on Linux"). The Windows rule above does not apply to Linux, and the Linux fix must never
 leak into the Windows build: keep Linux-only settings under Linux-only `cfg`/target sections.

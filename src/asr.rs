@@ -337,15 +337,15 @@ mod tests {
     /// by turn (shared-machine mode) never waits on a model load.
     ///
     /// ```bash
-    /// CNVERC_TEST_MODELS=/abs/path/models \
-    /// CNVERC_TEST_WAV_ES=/abs/path/spanish-16k.wav \
+    /// VOLIS_TEST_MODELS=/abs/path/models \
+    /// VOLIS_TEST_WAV_ES=/abs/path/spanish-16k.wav \
     /// cargo test --release -- --ignored --nocapture alternates
     /// ```
     #[test]
     #[ignore = "needs the Whisper model and a Spanish recording; see the doc comment"]
     fn whisper_alternates_languages_without_reloading() {
-        let models_root = std::env::var("CNVERC_TEST_MODELS").expect("CNVERC_TEST_MODELS");
-        let wav = std::env::var("CNVERC_TEST_WAV_ES").expect("CNVERC_TEST_WAV_ES");
+        let models_root = std::env::var("VOLIS_TEST_MODELS").expect("VOLIS_TEST_MODELS");
+        let wav = std::env::var("VOLIS_TEST_WAV_ES").expect("VOLIS_TEST_WAV_ES");
         let pcm = crate::wav::read_16k_mono(Path::new(&wav)).expect("read the recording");
         let engine = models::discover(&Path::new(&models_root).join("asr"), Role::Asr)
             .into_iter()
@@ -375,15 +375,15 @@ mod tests {
     /// check. Needs a models tree and a 16 kHz mono recording:
     ///
     /// ```bash
-    /// CNVERC_TEST_MODELS=/abs/path/models \
-    /// CNVERC_TEST_WAV_ES=/abs/path/spanish.wav \
+    /// VOLIS_TEST_MODELS=/abs/path/models \
+    /// VOLIS_TEST_WAV_ES=/abs/path/spanish.wav \
     /// cargo test -- --ignored --nocapture both_engines
     /// ```
     #[test]
     #[ignore = "needs the ASR models and a recording; see the doc comment"]
     fn both_engines_transcribe_the_same_utterance() {
-        let models_root = std::env::var("CNVERC_TEST_MODELS").expect("CNVERC_TEST_MODELS");
-        let wav = std::env::var("CNVERC_TEST_WAV_ES").expect("CNVERC_TEST_WAV_ES");
+        let models_root = std::env::var("VOLIS_TEST_MODELS").expect("VOLIS_TEST_MODELS");
+        let wav = std::env::var("VOLIS_TEST_WAV_ES").expect("VOLIS_TEST_WAV_ES");
         let pcm = crate::wav::read_16k_mono(Path::new(&wav)).expect("read the recording");
 
         let entries = models::discover(&Path::new(&models_root).join("asr"), Role::Asr);

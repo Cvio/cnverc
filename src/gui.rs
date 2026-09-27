@@ -1273,6 +1273,10 @@ impl App {
             .flatten()
             .chain(self.voices.iter().flat_map(|v| v.languages.clone()))
             .filter(|l| l != "...")
+            // Only what the varieties table knows: an unknown one would be
+            // refused by the translator.
+            .filter(|l| varieties::lookup(l).is_some())
+            .map(|l| l.to_lowercase())
             .collect();
         languages.sort();
         languages.dedup();
@@ -1419,16 +1423,7 @@ impl App {
             ),
         ] {
             ui.label(label);
-            egui::ComboBox::from_id_salt(id)
-                .width(ui.available_width())
-                .selected_text(describe_language(value))
-                .show_ui(ui, |ui| {
-                    for code in &languages {
-                        changed |= ui
-                            .selectable_value(value, code.clone(), describe_language(code))
-                            .changed();
-                    }
-                });
+            changed |= language_and_variety(ui, id, "", value, &languages);
         }
 
         if self.config.languages.source == self.config.languages.target {
@@ -1511,9 +1506,16 @@ impl App {
                 ui.weak("Voices are chosen for each side, above the two columns.");
                 return;
             }
+            let fit = crate::models::rank(&self.config.languages.target, &self.voices)
+                .first()
+                .map(|r| r.fit.label(&self.config.languages.target));
             match tts::for_language(&self.voices, &self.config.languages.target) {
                 Ok(voice) => {
-                    ui.weak(format!("Voice: {}", voice.name));
+                    ui.weak(format!(
+                        "Voice: {} ({})",
+                        voice.name,
+                        fit.unwrap_or_default()
+                    ));
                 }
                 Err(_) => {
                     ui.colored_label(
@@ -1740,16 +1742,13 @@ impl App {
                 &mut self.config.shared.right_asr,
             ),
         };
-        egui::ComboBox::from_id_salt(("shared language", side.to_string()))
-            .width(ui.available_width())
-            .selected_text(format!("Speaks {}", describe_language(language)))
-            .show_ui(ui, |ui| {
-                for code in &languages {
-                    changed |= ui
-                        .selectable_value(language, code.clone(), describe_language(code))
-                        .changed();
-                }
-            });
+        changed |= language_and_variety(
+            ui,
+            &format!("shared language {side}"),
+            "Speaks ",
+            language,
+            &languages,
+        );
 
         let heard_by = recognizers
             .iter()
@@ -2107,6 +2106,54 @@ impl eframe::App for App {
             }
         });
     }
+}
+
+/// Two dropdowns for one language setting: the language, then its variety
+/// ("(any)" or one from src/varieties.rs), shown only when the table lists
+/// varieties for it. Choosing a new language clears the variety. Returns
+/// whether the value changed.
+fn language_and_variety(
+    ui: &mut egui::Ui,
+    id: &str,
+    prefix: &str,
+    value: &mut String,
+    languages: &[String],
+) -> bool {
+    let before = value.clone();
+    let mut language = varieties::language_of(value).to_lowercase();
+    egui::ComboBox::from_id_salt((id, "language"))
+        .width(ui.available_width())
+        .selected_text(format!("{prefix}{}", describe_language(&language)))
+        .show_ui(ui, |ui| {
+            for code in languages {
+                ui.selectable_value(&mut language, code.clone(), describe_language(code));
+            }
+        });
+    if language != varieties::language_of(value).to_lowercase() {
+        *value = language.clone();
+    }
+    let options = varieties::varieties_of(&language);
+    if !options.is_empty() {
+        egui::ComboBox::from_id_salt((id, "variety"))
+            .width(ui.available_width())
+            .selected_text(if varieties::has_variety(value) {
+                format!("Variety: {}", varieties::display_name(value))
+            } else {
+                "Variety: (any)".to_string()
+            })
+            .show_ui(ui, |ui| {
+                ui.selectable_value(value, language.clone(), "(any)");
+                for v in options {
+                    ui.selectable_value(value, v.tag.to_string(), v.display);
+                }
+            })
+            .response
+            .on_hover_text(
+                "A regional variety: models tuned for it are offered first, and the \
+                 translation is asked to use its everyday wording.",
+            );
+    }
+    *value != before
 }
 
 fn describe_language(code: &str) -> String {

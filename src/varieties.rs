@@ -126,7 +126,6 @@ pub fn has_variety(tag: &str) -> bool {
 
 /// The varieties the table lists for a language, not counting the plain
 /// language itself: for `es`, just `es-MX`.
-#[allow(dead_code, reason = "the variety dropdowns, Part B7")]
 pub fn varieties_of(language: &str) -> Vec<&'static Variety> {
     TABLE
         .iter()

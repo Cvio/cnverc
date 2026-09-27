@@ -1509,7 +1509,7 @@ impl App {
             let fit = crate::models::rank(&self.config.languages.target, &self.voices)
                 .first()
                 .map(|r| r.fit.label(&self.config.languages.target));
-            match tts::for_language(&self.voices, &self.config.languages.target) {
+            match tts::choose(&self.voices, &self.config.languages.target) {
                 Ok(voice) => {
                     ui.weak(format!(
                         "Voice: {} ({})",

@@ -97,6 +97,9 @@ pub enum PipelineMsg {
     /// Shared-machine mode: the turn, or whatever it was producing, was
     /// cancelled. Nothing from it will be translated or spoken.
     TurnCancelled,
+    /// Shared-machine mode: whether one side's recognizer is ready, and if
+    /// not, why. Shown in that side's column.
+    SharedSide { side: Side, problem: Option<String> },
     /// The turn has ended: the microphone is closed, and what was said is on
     /// its way through recognition and translation.
     TurnEnded,
@@ -201,6 +204,9 @@ pub enum PipelineCmd {
     /// Shared-machine mode: throw away the turn in progress, or stop what is
     /// being worked on or spoken. Nothing from it is translated or spoken.
     Cancel,
+    /// Shared-machine mode: the sides' settings changed. Load and prepare
+    /// each side's recognizer now, so no turn waits on a load.
+    PrepareShared(Box<crate::config::Shared>),
 }
 
 /// Something to say aloud.
@@ -388,7 +394,8 @@ fn run(root: &Path, config: &Config, options: &Options, wiring: RunWiring) -> Re
         }
         Recognizers {
             selected: None,
-            selected_engine: None,
+            selected_name: selected_name.clone(),
+            extra: HashMap::new(),
             comparison: loaded,
         }
     } else {
@@ -399,7 +406,8 @@ fn run(root: &Path, config: &Config, options: &Options, wiring: RunWiring) -> Re
         }
         Recognizers {
             selected: load_selected(&engines, &selected_name)?,
-            selected_engine: find_selected(&engines, &selected_name).ok().cloned(),
+            selected_name: selected_name.clone(),
+            extra: HashMap::new(),
             comparison: Vec::new(),
         }
     };
@@ -418,8 +426,9 @@ fn run(root: &Path, config: &Config, options: &Options, wiring: RunWiring) -> Re
 
     // Shared-machine mode alternates two languages turn by turn. Build
     // Whisper's recognizer for both now, so no turn waits on a model load.
+    let mut shared_settings = config.shared.clone();
     if config.mode.kind == ModeKind::Shared {
-        prepare_shared(&mut asr, &config.shared, events);
+        prepare_shared(&mut asr, &engines, &shared_settings, events);
     }
 
     // Solo, this PC speaks its own translations. Paired, the other PC speaks
@@ -439,8 +448,7 @@ fn run(root: &Path, config: &Config, options: &Options, wiring: RunWiring) -> Re
             // waits on a load. A side whose voice is missing is refused by the
             // window when its key is pressed, so here it is only reported.
             for side in [Side::Left, Side::Right] {
-                let recognizer = asr.selected_engine.as_ref();
-                match shared::direction(side, &config.shared, recognizer, &voices) {
+                match shared::direction(side, &config.shared, &engines, &selected_name, &voices) {
                     Ok(resolved) => {
                         let folder = resolved.direction.voice;
                         if loaded.contains_key(&folder) {
@@ -642,7 +650,7 @@ fn run(root: &Path, config: &Config, options: &Options, wiring: RunWiring) -> Re
                     segmenter.reset(captured);
                     hearing_speech = false;
                     if mode == ModeKind::Shared {
-                        prepare_shared(&mut asr, &config.shared, events);
+                        prepare_shared(&mut asr, &engines, &shared_settings, events);
                     }
                     if mode == ModeKind::Continuous {
                         mic = Some(Mic::open(device)?);
@@ -666,10 +674,27 @@ fn run(root: &Path, config: &Config, options: &Options, wiring: RunWiring) -> Re
                 PipelineCmd::BeginSharedTurn(direction)
                     if mode == ModeKind::Shared && turn.is_none() =>
                 {
+                    // Normally loaded already, when Shared mode started or its
+                    // settings changed; loaded now otherwise.
+                    let ready = asr
+                        .ensure(&engines, &direction.asr, events)
+                        .and_then(|()| asr.prepare(&direction.asr, &direction.source));
+                    if let Err(e) = ready {
+                        warn!("{} side: {e:#}", direction.side);
+                        let _ = events.send(PipelineMsg::SharedSide {
+                            side: direction.side,
+                            problem: Some(format!("{e:#}")),
+                        });
+                        continue;
+                    }
                     info!(
-                        "shared machine: {} turn; recognising \"{}\", translating into \"{}\", \
-                         voice \"{}\"",
-                        direction.side, direction.source, direction.target, direction.voice
+                        "shared machine: {} turn; recognising \"{}\" with \"{}\", translating \
+                         into \"{}\", voice \"{}\"",
+                        direction.side,
+                        direction.source,
+                        direction.asr,
+                        direction.target,
+                        direction.voice
                     );
                     if let Some(open) =
                         open_turn(device, playback.as_ref(), Some(direction.side), events)
@@ -729,6 +754,12 @@ fn run(root: &Path, config: &Config, options: &Options, wiring: RunWiring) -> Re
                 // Already in that mode, or a turn asked for outside turn mode
                 // or while one is already open: nothing to do. The pairing
                 // commands are the peer thread's, not this one's.
+                PipelineCmd::PrepareShared(settings) => {
+                    shared_settings = *settings;
+                    if mode == ModeKind::Shared {
+                        prepare_shared(&mut asr, &engines, &shared_settings, events);
+                    }
+                }
                 PipelineCmd::SetMode(_)
                 | PipelineCmd::BeginTurn
                 | PipelineCmd::BeginSharedTurn(_)
@@ -893,20 +924,26 @@ fn open_turn(
 /// why when tried.
 fn prepare_shared(
     asr: &mut Recognizers,
+    engines: &[Engine],
     settings: &crate::config::Shared,
     events: &Sender<PipelineMsg>,
 ) {
-    let Some(selected) = asr.selected.as_mut() else {
-        return;
-    };
-    for language in [&settings.left_language, &settings.right_language] {
-        let _ = events.send(PipelineMsg::Loading(format!(
-            "the recognizer for \"{language}\""
-        )));
-        if let Err(e) = selected.prepare(language) {
-            warn!("cannot prepare the recognizer for \"{language}\": {e:#}");
-            let _ = events.send(PipelineMsg::Error(format!("{e:#}")));
-        }
+    // Each side's recognizer, loaded and ready for that side's language. A side
+    // that fails says so in its own column; the other side keeps working.
+    for side in [Side::Left, Side::Right] {
+        let language = side.language(settings).to_string();
+        let result = shared::recognizer_for(side, settings, engines, &asr.selected_name)
+            .map_err(|why| anyhow!(why))
+            .and_then(|engine| {
+                let folder = engine.dir_name.clone();
+                asr.ensure(engines, &folder, events)?;
+                asr.prepare(&folder, &language)
+            });
+        let problem = result.err().map(|e| {
+            warn!("shared machine, {side} side: {e:#}");
+            format!("{e:#}")
+        });
+        let _ = events.send(PipelineMsg::SharedSide { side, problem });
     }
 }
 
@@ -945,10 +982,67 @@ struct Turn {
 /// The recognizers a run has loaded.
 struct Recognizers {
     selected: Option<Box<dyn SegmentAsr + Send>>,
-    /// The selected recognizer's description, for shared-machine mode's
-    /// language check.
-    selected_engine: Option<Engine>,
+    /// The main recognizer's folder name (`[asr].engine`).
+    selected_name: String,
+    /// Shared-machine mode: other sides' recognizers, by folder name, loaded
+    /// once and kept. The main one is never loaded twice.
+    extra: HashMap<String, Box<dyn SegmentAsr + Send>>,
     comparison: Vec<(String, Box<dyn SegmentAsr + Send>)>,
+}
+
+impl Recognizers {
+    /// Load the recognizer in `folder` unless it is already loaded.
+    fn ensure(
+        &mut self,
+        engines: &[Engine],
+        folder: &str,
+        events: &Sender<PipelineMsg>,
+    ) -> Result<()> {
+        if (folder == self.selected_name && self.selected.is_some())
+            || self.extra.contains_key(folder)
+        {
+            return Ok(());
+        }
+        let _ = events.send(PipelineMsg::Loading(format!("the recognizer \"{folder}\"")));
+        check_selection(engines, folder)?;
+        let loaded = load_selected(engines, folder)?
+            .ok_or_else(|| anyhow!("no recognizer is named \"{folder}\""))?;
+        if folder == self.selected_name {
+            self.selected = Some(loaded);
+        } else {
+            self.extra.insert(folder.to_string(), loaded);
+        }
+        log_memory(&format!("after loading \"{folder}\""));
+        Ok(())
+    }
+
+    /// The recognizer in `folder`, or the main one when `folder` is `None`.
+    fn get_mut(&mut self, folder: Option<&str>) -> Option<&mut Box<dyn SegmentAsr + Send>> {
+        match folder {
+            Some(name) if name != self.selected_name => self.extra.get_mut(name),
+            _ => self.selected.as_mut(),
+        }
+    }
+
+    /// Get `folder`'s recognizer ready for `language` (Whisper builds one per
+    /// language).
+    fn prepare(&mut self, folder: &str, language: &str) -> Result<()> {
+        self.get_mut(Some(folder))
+            .ok_or_else(|| anyhow!("the recognizer \"{folder}\" is not loaded"))?
+            .prepare(language)
+    }
+}
+
+/// Log how much memory cnverc is using. The models run on the CPU, so this is
+/// the memory that matters; a second recognizer roughly adds its size.
+fn log_memory(when: &str) {
+    match memory_stats::memory_stats() {
+        Some(usage) => info!(
+            "memory in use {when}: {} MB",
+            usage.physical_mem / (1024 * 1024)
+        ),
+        None => debug!("memory use is not available on this system"),
+    }
 }
 
 /// The longest stretch handed to a recognizer at once. Whisper hears 30
@@ -1399,11 +1493,14 @@ impl Stage<'_> {
             utterance.index
         );
 
-        if let Some(selected) = asr.selected.as_mut() {
+        let recognizer_name = direction
+            .map(|d| d.asr.clone())
+            .unwrap_or_else(|| asr.selected_name.clone());
+        if let Some(selected) = asr.get_mut(direction.map(|d| d.asr.as_str())) {
             let began = Instant::now();
             // Logged every time: if the key's language were lost, Whisper would
             // guess, be right most of the time, and hide the bug.
-            info!("  transcribing as \"{source}\"");
+            info!("  transcribing as \"{source}\" with \"{recognizer_name}\"");
             match transcribe_parts(selected, &utterance.pcm, parts, source) {
                 // No words: usually a cough, sometimes real speech the
                 // recognizer failed on. Neither is sent to the translator, and

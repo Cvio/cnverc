@@ -26,6 +26,7 @@ eframe = "0.36"
 serde_json = "1"
 gethostname = "1"
 if-addrs = "0.15.0"
+memory-stats = "1"
 
 # sherpa-onnx is split by platform so the Windows build is untouched: the
 # static library, linked against the static CRT (see .cargo/config.toml).

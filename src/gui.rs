@@ -301,6 +301,8 @@ pub struct Session {
     /// Shared machine: whose turn is being recorded, worked on or spoken.
     /// Cleared when the turn is fully over.
     pub active_side: Option<Side>,
+    /// Shared machine: a side whose recognizer couldn't be loaded, and why.
+    pub side_problems: HashMap<Side, String>,
 }
 
 impl Default for Session {
@@ -322,6 +324,7 @@ impl Default for Session {
             floor_note: None,
             discovered: Vec::new(),
             active_side: None,
+            side_problems: HashMap::new(),
         }
     }
 }
@@ -377,6 +380,14 @@ impl Session {
                 self.floor_note = None;
                 self.active_side = side;
             }
+            PipelineMsg::SharedSide { side, problem } => match problem {
+                Some(why) => {
+                    self.side_problems.insert(side, why);
+                }
+                None => {
+                    self.side_problems.remove(&side);
+                }
+            },
             PipelineMsg::TurnCancelled => {
                 self.turn = TurnState::Idle;
                 self.active_side = None;
@@ -827,16 +838,19 @@ impl App {
                     info!("shared machine: {side} key ignored: {why}");
                 }
                 SharedPress::Begin => {
-                    let recognizer = self.selected_recognizer();
-                    match shared::direction(side, &self.config.shared, recognizer, &self.voices) {
+                    let recognizers = self.asr_engines();
+                    match shared::direction(
+                        side,
+                        &self.config.shared,
+                        &recognizers,
+                        &self.config.asr.engine,
+                        &self.voices,
+                    ) {
                         Ok(resolved) => {
-                            match resolved.warning {
-                                Some(warning) => {
-                                    self.shared_notes.insert(side, warning);
-                                }
-                                None => {
-                                    self.shared_notes.remove(&side);
-                                }
+                            if resolved.warnings.is_empty() {
+                                self.shared_notes.remove(&side);
+                            } else {
+                                self.shared_notes.insert(side, resolved.warnings.join(" "));
                             }
                             info!("shared machine: {side} key; starting the {side} turn");
                             pipeline.send(PipelineCmd::BeginSharedTurn(resolved.direction));
@@ -1227,6 +1241,17 @@ impl App {
             .save_selections(&self.config_path)
             .err()
             .map(|e| format!("{e:#}"));
+    }
+
+    /// Every recognizer that parsed, whether or not its files are all present.
+    fn asr_engines(&self) -> Vec<Engine> {
+        self.recognizers
+            .iter()
+            .filter_map(|entry| match entry {
+                Entry::Loaded(e) => Some(e.clone()),
+                Entry::Failed { .. } => None,
+            })
+            .collect()
     }
 
     fn selected_recognizer(&self) -> Option<&Engine> {
@@ -1634,6 +1659,13 @@ impl App {
         }
         if changed {
             self.save();
+            // Load and prepare the sides' recognizers now, not on the next
+            // key press.
+            if let Some(pipeline) = &self.pipeline {
+                pipeline.send(PipelineCmd::PrepareShared(Box::new(
+                    self.config.shared.clone(),
+                )));
+            }
         }
         ui.add_space(6.0);
 
@@ -1761,10 +1793,12 @@ impl App {
         let refusal = shared::direction(
             side,
             &self.config.shared,
-            self.selected_recognizer(),
+            &self.asr_engines(),
+            &self.config.asr.engine,
             &self.voices,
         )
-        .err();
+        .err()
+        .or_else(|| s.side_problems.get(&side).cloned());
 
         egui::Frame::new()
             .fill(if mine { fill } else { IDLE })

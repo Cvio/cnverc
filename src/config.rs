@@ -112,7 +112,7 @@ pub struct Peer {
 
 /// Shared-machine mode (M7.5): two people, one machine, a key each. The key
 /// says who is talking and so which language they speak.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct Shared {
     pub left_language: String,

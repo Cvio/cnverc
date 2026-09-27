@@ -1,38 +1,14 @@
 # cnverc: technical notes
 
-This is the maintainer's companion to [README.md](README.md). The README explains what cnverc
-is and how to set it up. This file explains how it's built and why. The build specification
-is [SPEC.md](SPEC.md); the constraints every change must respect are restated in
-[CLAUDE.md](CLAUDE.md). How to tune models for a regional dialect, and which ones, is in
-[DIALECTS.md](DIALECTS.md).
+Why cnverc is built the way it is: design decisions, measurements, and the build internals
+that are easy to break. Read this before changing the build or reversing a decision.
 
-## Status
+- How the code fits together: [ARCHITECTURE.md](ARCHITECTURE.md).
+- The models, and how to add one: [MODELS.md](MODELS.md).
+- The build specification: [SPEC.md](SPEC.md). Its hard constraints are restated in
+  [CLAUDE.md](CLAUDE.md), and project status is kept there and in [HANDOFF.md](HANDOFF.md).
 
-Milestones 0–7 of 9 are complete, and M7.5 (shared-machine mode) is built and waiting for
-its check by hand. Milestones are defined in `SPEC.md` §13 and built in order;
-each one's check must pass before the next starts.
-
-Windows is the primary platform. Linux builds and runs the full pipeline too, using a shared
-sherpa-onnx build; see "Linux: shared sherpa-onnx" under Building.
-
-| Milestone | What it added |
-|---|---|
-| M0 | Skeleton, path resolution, config load, model discovery, `--report` |
-| M1 | cpal capture, resampling to 16 kHz mono at the capture boundary, Silero VAD cutting utterances |
-| M2 | Segment ASR for Parakeet and Whisper, the utterance ring buffer, `--compare` |
-| M3 | In-process translation through llama.cpp, on its own thread |
-| M4 | Synthesis through sherpa-onnx, playback through cpal, the half-duplex gate |
-| M5 | The egui window; the pipeline reports only through `PipelineMsg` |
-| M6 | Continuous and turn-based modes, switchable while running; the turn key in toggle and hold styles |
-| M7 | Paired mode: listener, dialler, `Hello`, `Utterance`, the floor token, the peer panel, the firewall diagnostic, the headset warning, discovery |
-| M7.5 | Shared-machine mode: two people, one machine, a key each; per-turn languages through recognition, translation and speech (check pending) |
-
-## Architecture
-
-How the modules fit together, the threads and messages, and a turn traced end to end are in
-[ARCHITECTURE.md](ARCHITECTURE.md). What follows here are the design decisions behind them.
-
-Details worth knowing:
+## Design decisions
 
 - **VAD pre-roll is 600 ms.** Shorter pre-roll lost first words in live tests. Segment
   timestamps are on the capture timeline (`Segmenter::reset(origin)`).
@@ -46,7 +22,16 @@ Details worth knowing:
   (`gui::TurnKey`), so a held key counts as one press.
 - **The voice is chosen by language**, not by a config key: §7 defines none, and §9 says the
   language decides which voice speaks. Solo, that is the target language. Paired, it is each
-  received utterance's own `lang`, never inferred.
+  received utterance's own `lang`, never inferred. When several voices fit, `models::rank`
+  decides, by the variety declared in each voice's `engine.toml` (M7.7). Shared mode alone has
+  per-side voice pickers.
+- **Varieties are BCP 47 tags from a fixed table** (`src/varieties.rs`), not free text: a tag
+  the table doesn't know is refused, because a prompt saying "into xx-YY" translates worse than
+  one naming the dialect, and a typo would otherwise pass silently. Whisper is told only the
+  language part; its language token has no regions.
+- **Whisper is this user's recognizer.** In live `--compare` testing, Parakeet dropped words
+  where Whisper didn't. Parakeet stays installed and is allowed everywhere, including Shared
+  mode, where it carries a note because it ignores the language it's told.
 - **Recognition and translation each use 6 threads.**
 - The window renders with **DirectX 12** on Windows. The Vulkan backend logged loader errors
   at startup. It uses **FXC**, the shader compiler built into Windows: wgpu's default takes any
@@ -87,51 +72,6 @@ rather than cnverc choosing for you. There is no config key naming the file, bec
 defines none; the filesystem is the index.
 
 Qwen's own GGUF repositories publish only Q8_0, which is why the Q4_K_M comes from unsloth.
-
-## Comparing recognizers
-
-`--compare` (or **Compare recognizers** in the window) runs every installed recognizer on each
-utterance and prints the results side by side. It exists because published word error rates
-are measured on read speech, not on your microphone and your accent (`SPEC.md` §12).
-
-It always prints each engine's wall-clock time together with the length of the audio. Whisper
-pads every utterance to a 30-second window internally, so a 1-second utterance costs it about
-what a 20-second one does.
-
-In live testing, Parakeet dropped words for this user where Whisper didn't, so Whisper is the
-one in use.
-
-## Model layout and discovery
-
-Everything resolves from the directory containing `cnverc.exe`, never from the working
-directory or `%APPDATA%`. `paths::app_root()` is the only path derivation.
-
-```
-cnverc/
-  cnverc.exe
-  cnverc.toml
-  models/
-    vad/silero_vad.onnx
-    asr/<engine dir>/engine.toml + model files
-    mt/<translation>.gguf
-    tts/<voice dir>/engine.toml + model files
-  logs/
-```
-
-Each ASR and TTS directory describes itself in an `engine.toml`. Adding a model means dropping
-a folder in and restarting: there is no registry, no cache and no download UI.
-
-- A directory without an `engine.toml` is skipped with a warning.
-- A directory whose `engine.toml` names a missing file is listed but **disabled**, with the
-  missing filename shown.
-- Piper voices declare their `espeak-ng-data` directory with `data_dir`, because a directory
-  can't be listed under `[files]`.
-- Model files keep their published names. If an archive's filenames differ from what the
-  shipped `engine.toml` declares, edit the `engine.toml`; don't rename the model files.
-
-The `engine.toml` files are committed; the weights never are (see `.gitignore`). All models
-are expected to be resident at the same time and to fit in 8 GB of VRAM alongside a desktop
-session.
 
 ## Building
 
@@ -176,7 +116,8 @@ How it's wired, all of it Linux-only so the Windows build is untouched:
   `cfg(target_os = "linux")`. It must be split this way. `sherpa-onnx-sys` refuses to build
   with both `static` and `shared` on, and adding `shared` on top of the default would turn on
   both.
-- `SHERPA_ONNX_LIB_DIR` must point at the shared build's `lib/` (README, "Setting up on Linux").
+- `SHERPA_ONNX_LIB_DIR` must point at the shared build's `lib/`. `build-sherpa-linux.sh`
+  builds it into `~/sherpa-onnx/install`, and `setup.sh` sets the variable.
   Without it, the build script downloads the official `linux-x64-shared-lib` archive instead,
   which hasn't been tested.
 - The build script copies `libsherpa-onnx-c-api.so` next to the executable, but a dependency's
@@ -203,12 +144,11 @@ acceptance test is Windows-only. At startup, Ubuntu's onnxruntime prints one har
 `Schema error: ... TreeEnsembleClassifier ... already registered`.
 
 **Distributions without an onnxruntime package.** Ubuntu 26.04 has `libonnxruntime-dev` 1.23.
-Ubuntu 24.04 LTS and Fedora don't package onnxruntime at all, which is why the README's Fedora
-line can't name it. On such a machine sherpa-onnx's cmake falls back to downloading the same
+Ubuntu 24.04 LTS and Fedora don't package onnxruntime at all. On such a machine sherpa-onnx's cmake falls back to downloading the same
 static `1.28.2-glibc2_17` build that crashes, **the configure and build both succeed**, and the
-failure only appears when a model session is created. That is why the README's Linux step 3
-asks you to check the configure output for `location_onnxruntime_lib: /usr/lib/...` and to stop
-if it says `Downloading pre-compiled onnxruntime` instead. Without a distribution package the
+failure only appears when a model session is created. That is why `build-sherpa-linux.sh`
+checks the configure output for `location_onnxruntime_lib: /usr/lib/...` and stops if it says
+`Downloading pre-compiled onnxruntime` instead. Without a distribution package the
 options are to build onnxruntime from source, or to try sherpa-onnx's own
 `linux-x64-shared-lib` release archive, which bundles a matching onnxruntime and would remove
 the distribution dependency entirely - untested here, and the obvious next experiment if Linux
@@ -242,189 +182,3 @@ it: Vulkan-backed whisper builds have failed on this platform before.
 
 There is no JavaScript toolchain, no `package.json` and no webview. The GUI is native egui
 compiled into the binary.
-
-## Development workflow
-
-During development cnverc runs from `target/debug/`, so copy the models and config there once,
-then point the download script at the same folder:
-
-```bash
-cp -r models cnverc.toml target/debug/
-```
-
-```bash
-./setup-models.sh target/debug
-```
-
-`setup-models.sh` takes the folder the executable is in and defaults to `target/release`. It
-skips anything already present, so it is safe to re-run, and it is the only place the model
-URLs are written down: the README's model table names the archives but does not repeat the
-commands.
-
-Before every commit:
-
-```bash
-cargo fmt --check
-```
-
-```bash
-cargo clippy --all-targets -- -D warnings
-```
-
-```bash
-cargo test
-```
-
-A running `cnverc.exe` locks its own file, so close the window before rebuilding or the build
-fails with "Access is denied".
-
-### Tests that need real audio
-
-Some tests need files that aren't in the repository: the models and 16 kHz mono recordings of
-someone talking. They are `#[ignore]`d by default:
-
-```bash
-CNVERC_TEST_VAD_MODEL=/abs/path/silero_vad.onnx CNVERC_TEST_WAV=/abs/path/speech.wav CNVERC_TEST_MODELS=/abs/path/models CNVERC_TEST_WAV_ES=/abs/path/spanish-16k.wav cargo test --release -- --ignored --nocapture
-```
-
-The recordings must be 16 kHz mono. The pipeline resamples at the capture boundary and nowhere
-else, and the test reader refuses to add a second resampling path. The Parakeet archive ships
-`test_wavs/es.wav` at 22050 Hz; convert it once with:
-
-```bash
-ffmpeg -i es.wav -ar 16000 -ac 1 es-16k.wav
-```
-
-### Testing without a person talking
-
-A Piper voice can supply the speech. This is how the Linux build was checked end to end
-without anyone at the microphone. Make a clip with sherpa-onnx's TTS program (from the shared
-build's `bin/`), then play it into a running `--listen` through the speakers:
-
-```bash
-V=target/release/models/tts/vits-piper-en_US-lessac-medium
-sherpa-onnx-offline-tts --vits-model=$V/en_US-lessac-medium.onnx --vits-tokens=$V/tokens.txt --vits-data-dir=$V/espeak-ng-data --output-filename=en.wav "Where is the train station?"
-```
-
-```bash
-./target/release/cnverc --listen --seconds 60 &
-sleep 30; aplay en.wav; wait
-```
-
-The model load takes about 20 s, which is why the clip plays after 30. Piper writes 22050 Hz
-(the `x_low` Spanish voice writes 16 kHz). `sherpa-onnx-offline` and cnverc's capture path both
-resample, but `sherpa-onnx-vad` and the `#[ignore]`d tests need 16 kHz, so convert first. The
-same clip also makes a quick check that sherpa-onnx itself works, with no cnverc involved:
-run it through `sherpa-onnx-offline` with the recognizer's files.
-
-### Logs
-
-Logs are written to `logs/` next to the exe. `--listen --wav` also writes each utterance to
-`logs/segments/`, which is how a misheard sentence gets diagnosed.
-
-## Shared-machine mode (M7.5)
-
-Two people, one machine, a key each (`shared-machine-mode.md`). What the code does:
-
-- **The direction rule** is `shared::direction`, pure and tested. Given which side pressed, it
-  returns the language to recognise (that side's), the language to translate into (the other
-  side's), and the voice's folder, or the reason there can be no turn. It refuses a recognizer
-  that isn't Whisper: Parakeet v3 is multilingual but detects the language itself and ignores
-  the one it's given, so it can't honour "the key sets the language".
-- **The language travels with the turn.** `PipelineCmd::BeginSharedTurn(Direction)` opens the
-  microphone; the direction rides on the `Turn`, then `ToTranslate`, then `SpeakJob`, so the
-  recognizer, translator and speaker take the language and voice from the job, not the run.
-  Every utterance logs `transcribing as "<lang>"`: if the language were lost, Whisper would
-  guess, be right most of the time, and hide the bug. Told a Spanish clip was English, Whisper
-  quietly produces an English translation rather than failing.
-- **Whisper keeps a recognizer per language.** Its language is fixed when its recognizer is
-  built, and building one loads the model, which takes seconds. `WhisperAsr` used to rebuild on
-  every change of language; now it keeps one per language used, and Shared mode builds both at
-  startup (`SegmentAsr::prepare`), at the cost of a second copy of the model in memory (about
-  1 GB for turbo int8). sherpa-onnx 1.13.8 can change the language in place
-  (`SherpaOnnxOfflineRecognizerSetConfig`), but no Rust crate binds it, and its Whisper decoder
-  ignores the per-stream `"language"` option. If a later sherpa-onnx crate binds that call,
-  the second copy can go.
-- **One at a time** is `gui::Session::shared_press`, egui-free and tested: the same key ends its
-  turn, the other key is ignored during a turn, and both are ignored while the turn is worked
-  on or spoken. The microphone is closed between turns, as in turn mode.
-- **Escape** sends `PipelineCmd::Cancel`: a turn being recorded is discarded, a generation
-  counter moves on so queued translation and speech jobs from before it are dropped, and
-  `PlaybackControl::stop` empties the playback queue, after which the player reports the end
-  of speech as usual.
-- **Keys** are taken from the frame's input before any widget runs, as the Space key is, but
-  only while no text box has focus (`text_edit_focused`; `egui_wants_keyboard_input` is true for
-  any focused widget and would have disabled the arrows after any click). Escape is taken only
-  when there's something to cancel. Keys are written as words on screen: egui's built-in font
-  has no arrow glyphs.
-- **Voices** are chosen by folder name per side, which sidesteps the filed voice-picker issue
-  (two `es` voices, no tiebreak in `for_language`) without fixing it.
-
-## Paired mode
-
-Two cnverc instances as the two ends of one conversation (SPEC §9). How to use it, and the
-networking notes §14 requires, are in the README's "Talking between two PCs" section. This is
-how it works.
-
-**What crosses the wire.** Text only: `wire.rs` is newline-delimited JSON over TCP, exactly
-the messages in §9, so a connection can be faked with netcat. Each machine runs its whole
-pipeline; the sender's translation is the receiver's caption and speech. `Bye` may carry an
-optional `reason`, which is how a refused second connection learns why.
-
-**Untrusted input.** `wire::decode` refuses a line over 16 KiB, a line that is not UTF-8, and
-any message with an unknown `proto`, the last one shown on screen by name. Every string is
-bounded, too long is refused rather than truncated, control characters become spaces, and a
-language code must be letters and hyphens. Received text is only ever shown or spoken, and
-`source_text` is never translated again.
-
-**No names, only addresses.** The address field takes an IP address, with an optional port
-(47800 by default). A hostname would go to the system resolver, which can mean a public DNS
-server, so names are refused rather than looked up.
-
-**The floor** is `floor.rs`, a state machine with no sockets or clock, tested case by case:
-
-- The turn key sends `FloorRequest`. `Pipeline::send` routes `BeginTurn` to the peer thread
-  when paired, and the peer thread sends `BeginTurn` to the pipeline only when `FloorGrant`
-  arrives. The microphone never opens on a timeout: after 2 s the turn fails visibly.
-- Simultaneous requests go to the name that sorts first. Two PCs with the same name fall back
-  to their addresses, which both ends see the same way round.
-- The floor goes back after the turn's utterance has been sent. The translate thread sends
-  `ReleaseFloor` after handing the utterance to the peer thread, so the release follows it on
-  the wire. A turn with nothing recognised releases the floor at once.
-- A grant nobody is waiting for (cancelled, late or stale) is answered with `FloorRelease`, so
-  the two ends never disagree about who holds the floor.
-
-**Noticing a dead link.** A pulled cable sends nothing, not even a reset. Each end pings every
-2 s, and a reader that hears nothing for 6 s declares the link gone: the floor is
-force-released and both windows show the disconnected state. Verified on 2026-09-20 between
-the Windows PC and `ubox` over Wi-Fi, by disabling the adapter on one machine mid-session:
-both ends reported the loss and the floor was released. A disabled adapter and a pulled cable
-are the same case here - nothing arrives either way, and only the missed pings reveal it.
-
-Pairing was checked again the same day over a **direct Ethernet cable between the two PCs**,
-with Wi-Fi switched off on both: no router, no DHCP server and nothing upstream on the segment.
-Both ends fell back to link-local addressing (`169.254.x.x`) after about thirty seconds,
-discovery found the other PC, and the conversation worked. That is SPEC §2's "would it still
-work with the WAN cable unplugged and no DNS server anywhere on the segment?" answered on real
-hardware rather than by inspection. Three cosmetic defects in the peer panel surfaced during
-that run; see HANDOFF.md, section 8.
-
-**One peer at a time.** A second connection from a different PC is sent `Bye` with the reason
-and refused. Two connections between the same pair, from both PCs pressing Connect at once,
-settle on the one with the lower dialling address; both ends compute the same answer.
-
-**The firewall diagnostic** (§10). A refused dial means nothing is listening. A dial that
-times out means packets are being dropped. That message names the Windows firewall and the
-network profile, and adds that this PC's own firewall is suspect too if its listener has
-never accepted a connection.
-
-**Discovery** (`discovery.rs`) is a UDP broadcast on 47801 to every local network's broadcast
-address, plus 255.255.255.255, every 2 s. Windows sends the all-networks broadcast out of one
-interface only, so the per-network addresses are what reach a second network card. It only
-fills a pick-list. Typing the address always works, and nothing depends on discovery.
-
-**Testing on one PC.** `peer.rs`'s tests run two or three peers over loopback: a handshake, an
-utterance each way, the floor, a refused second connection, simultaneous dials, a hand-typed
-netcat session, and a dropped connection. To try the window with two instances on one PC,
-give the second copy its own folder and a different `[peer].listen_addr` port. Only one of the
-two can use discovery, since only one program can hold UDP port 47801.

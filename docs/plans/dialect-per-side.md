@@ -1,5 +1,8 @@
 # Instructions: per-side recognizers and dialect ("variety") support
 
+> **Completed.** Kept for history. What was built is described in
+> [ARCHITECTURE.md](../../ARCHITECTURE.md) and [MODELS.md](../../MODELS.md).
+
 For Claude Code. Two changes to cnverc, in order:
 
 - **Part A:** in shared mode, each person gets their own recognizer instead of one for both.

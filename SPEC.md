@@ -577,7 +577,7 @@ spoken, neither does, and the microphone is closed. Escape cancels a turn, or wh
 producing, and nothing from it is spoken. Each side has its own language and its own voice,
 chosen by folder name. The window shows a column per person with an unmistakable highlight on
 the active one. Shared mode and paired mode exclude each other. Specified in full in
-`shared-machine-mode.md`.
+`docs/plans/shared-machine-mode.md`.
 *Check:* by hand, with speakers at normal volume: English spoken on the left is heard in
 Spanish, Spanish on the right in English, never in the wrong language, and the log records the
 language used for every turn; the other key does nothing during a turn; Escape during a turn
@@ -596,7 +596,7 @@ Spanish on the right both transcribe correctly, and the log names the recognizer
 from a table in `src/varieties.rs`; `engine.toml` may declare `varieties`; recognizers and voices
 are ranked tuned, general, other-variety; Whisper is told the language only; the translation
 prompt names the variety and asks for its spoken form; paired mode sends full tags (protocol
-2). Specified in `dialect-per-side.md`.
+2). Specified in `docs/plans/dialect-per-side.md`.
 *Check:* a side set to Spanish (Mexico) offers the Mexico-tuned voice first, labelled; a turn in
 `es-MX` logs `es` going to Whisper; two machines pair and the translation arrives in the right
 variety.
@@ -621,7 +621,7 @@ of the state of M0–M8.
 - No `unwrap()` or `expect()` in any code path that runs after startup. Startup-time `expect()`
   with a message naming the missing file is fine, and preferred to a silent default.
 - Every error message concerning a file names the **absolute path** that was tried.
-- `README.md` lists each required model, the exact URL to obtain it, and where to extract it, plus
+- `README.md` (since the docs were split: `MODELS.md`) lists each required model, the exact URL to obtain it, and where to extract it, plus
   the networking setup notes in Appendix A. The app itself never uses those URLs.
 - `CLAUDE.md` at the repo root restates §2 in full, so the constraints survive into future sessions.
 

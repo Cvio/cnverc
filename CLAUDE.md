@@ -3,6 +3,13 @@
 `SPEC.md` is the build specification. Read it before changing anything. This file exists so
 the constraints below survive into sessions that have not read it.
 
+Which document holds what: `README.md` (setup for a less technical user, kept short),
+`USE-CASES.md` (situations, full troubleshooting, glossary), `MODELS.md` (the models explained
+simply, `engine.toml`, how to add one), `ARCHITECTURE.md` (every module, threads, mode
+internals, dev workflow), `TECHNICAL.md` (design decisions, build internals), `HANDOFF.md`
+(status, next steps). Each fact lives in one of them; the others link to it. Finished build
+instructions are kept in `docs/plans/`.
+
 ## Hard constraints (SPEC §2, restated in full)
 
 These are non-negotiable. If a design choice conflicts with one of these, the design choice

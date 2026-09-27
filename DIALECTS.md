@@ -188,33 +188,16 @@ files in `models/`, and run on whatever machine cnverc runs on.
 
 ## How cnverc handles dialects (varieties)
 
-Built in M7.7. The three code changes this section used to list are done.
+Built in M7.7. What a variety is, how models declare one in `engine.toml`, how cnverc ranks
+models for it, and how to add one are in
+[MODELS.md → Dialects](MODELS.md#dialects-varieties-in-plain-words) and
+[MODELS.md → Add a dialect](MODELS.md#add-a-dialect). The code is described in
+[ARCHITECTURE.md](ARCHITECTURE.md) (`varieties.rs`, `models::rank`).
 
-- **A variety is a BCP 47 tag,** a language plus a region: `es-MX`, `ar-IQ`, `ar-JO`, `en-US`.
-  Every language setting may hold one; a plain `es` means no particular dialect. The known
-  varieties are rows in `src/varieties.rs` (tag, name shown in the window, name used in the
-  prompt). **Adding a dialect is one row.** A tag not in the table is refused, not guessed.
-- **Models declare what they're tuned for** in `engine.toml`:
-
-  ```toml
-  languages = ["es"]
-  varieties = ["es-MX"]   # optional
-  ```
-
-  Each variety must be in the table and belong to one of `languages`, or the model is shown as
-  broken. No `varieties` line means a general model.
-- **The matching rule** (`models::rank`). For a side set to `es-MX`, recognizer and voice pickers
-  list: tuned for exactly `es-MX` ("tuned for Spanish (Mexico)"), then general `es` models
-  ("general"), then models tuned for another Spanish variety, labelled with it. For a plain `es`,
-  general models come first. The default is the first entry. This also settles which of two
-  Spanish voices speaks.
-- **Recognition:** Whisper is told the language only (`es`, never `es-MX`), and the log says so on
-  every utterance. The variety helps by choosing the model: tune a Whisper on the dialect, label
-  it, and it's offered first.
-- **Translation:** the prompt names the variety ("Translate the user's Iraqi Arabic text…"), and
-  for a target variety adds: *Write it the way an Iraqi Arabic speaker would say it aloud, using
-  everyday spoken wording rather than the formal written standard.*
-- **Paired mode** sends the full tag (protocol version 2).
+For training, what matters is: Whisper is told only the language (`es`, never `es-MX`), so a
+dialect helps recognition only through a model tuned on it; and the translation prompt names
+the variety and, for a target variety, asks for everyday spoken wording rather than the formal
+standard.
 
 **The limit, plainly:** the prompt can *ask* for Iraqi Arabic; whether Qwen3 1.7B can *write*
 convincing Iraqi Arabic is another matter. In the first test (the `dialect_pairs` test in

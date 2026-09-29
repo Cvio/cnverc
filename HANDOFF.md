@@ -67,6 +67,12 @@ Things not written down elsewhere:
 
 ## 5. Next steps
 
+- **M7.8 and M7.9** are on the `model-bench-work` branch: `--print-prompt`, `--translate`,
+  `--transcribe`, Persian, and Whisper listing Arabic and Persian. Built and checked on the build
+  PC; the user will test on another machine before merging. The branch also removes 14 stray
+  spaces from the dialect sentence of the translation prompt (a mangled line continuation from
+  M7.7), which had to be fixed before any translator is trained or benchmarked on the prompt.
+
 0. **The rename to Volis (2026-09-27)** is new: program `volis.exe`, settings `volis.toml`, logs
    `volis.log.<date>`, Rust package `volis`. `setup.sh` renames an existing `cnverc.toml` and
    removes the old `cnverc.exe`. The GitHub repo is still `Cvio/cnverc`; the README clones it

@@ -121,6 +121,13 @@ M8 (streaming ASR) has not started.
   general, other-variety and replaces "first match wins". Whisper is only ever told the
   language part. The translation prompt names the variety. Wire protocol is version 2.
 
+- M7.8 and M7.9 (built on `model-bench-work`, checked on the build PC): `--print-prompt` and
+  `--translate` for model-converter's translator training, and Persian (`fa`), Whisper's `ar`/`fa`,
+  and `--transcribe` for model-bench. `translate::prompt_template` is `prompt_for` with `{text}`:
+  one copy of the prompt, which trained translators and the bench depend on, so change it only
+  knowing trained models will need retraining. These commands log to stderr and print no banner
+  (`Command::stdout_is_data`).
+
 Linux (the user's `ubox`) builds and runs the full pipeline since 2026-09-19, using the shared
 sherpa-onnx build described under "Build note". Build there with `-j2`: a fully parallel
 build of llama.cpp ran the 10 GB machine out of memory.

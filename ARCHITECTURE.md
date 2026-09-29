@@ -252,6 +252,14 @@ break something if you change them without care.
 
 **`cli.rs`:** turns command-line arguments into a `Command`. It's small on purpose; the
 controls belong in the window.
+- `--print-prompt`, `--translate` (M7.8) and `--transcribe` (M7.9) serve the model-converter and
+  model-bench projects: the exact prompt (`translate::prompt_template`), stdin-to-stdout
+  translation (`translate::translate_lines`), and WAV transcription with one recognizer
+  (`main::transcribe_files`). Their stdout is data, so `main` skips the banner and logs to stderr
+  for them (`Command::stdout_is_data`).
+- **Rule:** the translator's prompt is also what trained translators learn and what the bench
+  measures. Changing its wording means a translator trained on the old prompt should be
+  retrained.
 
 **`paths.rs`:** every path Volis uses, all built from `app_root()`, the folder the program is
 in.

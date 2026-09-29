@@ -64,6 +64,11 @@ pub const TABLE: &[Variety] = &[
         display: "Arabic (Jordan)",
         prompt: "Jordanian Arabic",
     },
+    Variety {
+        tag: "fa",
+        display: "Persian",
+        prompt: "Persian",
+    },
     // Languages the translation prompt already knew by name, kept so they
     // don't stop working. They have no varieties yet.
     Variety {

@@ -1,14 +1,12 @@
 //! WAV files, for ears and for tests.
 //!
-//! Volis does not need WAV at runtime - it exists so a captured utterance
-//! can be played back and judged by a human (Milestone 1's check) and so the
-//! dual-run harness (SPEC §12) has something to feed.
+//! A captured utterance can be played back and judged by a human (Milestone
+//! 1's check), the dual-run harness (SPEC §12) has something to feed, and
+//! `volis --transcribe` (M7.9) reads the files it is given.
 
 use std::path::Path;
 
-#[cfg(test)]
-use anyhow::anyhow;
-use anyhow::{Context, Result};
+use anyhow::{anyhow, Context, Result};
 
 use crate::audio::SAMPLE_RATE;
 
@@ -47,11 +45,10 @@ pub fn write_any(path: &Path, samples: &[f32], sample_rate: u32) -> Result<()> {
     Ok(())
 }
 
-/// Read a mono WAV that is already at 16 kHz. Test support only for now: the
-/// pipeline resamples at the capture boundary and nowhere else, so this
-/// deliberately refuses to resample rather than quietly introducing a second
-/// path.
-#[cfg(test)]
+/// Read a mono WAV that is already at 16 kHz, for `volis --transcribe` and the
+/// tests. The pipeline resamples at the capture boundary and nowhere else, so
+/// this deliberately refuses to resample rather than quietly introducing a
+/// second path.
 pub fn read_16k_mono(path: &Path) -> Result<Vec<f32>> {
     let reader =
         hound::WavReader::open(path).with_context(|| format!("cannot read {}", path.display()))?;

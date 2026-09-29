@@ -230,6 +230,49 @@ fn prompt_for(text: &str, source: &str, target: &str) -> String {
     )
 }
 
+/// The exact prompt [`prompt_for`] sends, with the literal `{text}` where the
+/// user's words go. `volis --print-prompt` prints it, so a translator can be
+/// trained on precisely what volis will send it (M7.8). It calls `prompt_for`
+/// itself: there is only one copy of the prompt.
+pub fn prompt_template(source: &str, target: &str) -> String {
+    prompt_for("{text}", source, target)
+}
+
+/// `volis --translate`: one translation per input line, in order (M7.8).
+///
+/// An empty input line gives an empty output line, and so does a line the
+/// translator refuses (the echo, recital and length guards stay on), with the
+/// reason written to `errors` beside its line number: line N of the output
+/// always belongs to line N of the input. Output is flushed after every line,
+/// so a caller reading line by line isn't kept waiting.
+pub fn translate_lines<T: Translator>(
+    translator: &mut T,
+    source: &str,
+    target: &str,
+    input: impl std::io::BufRead,
+    mut output: impl std::io::Write,
+    mut errors: impl std::io::Write,
+) -> Result<()> {
+    for (index, line) in input.lines().enumerate() {
+        let line = line.map_err(|e| anyhow!("cannot read line {} of the input: {e}", index + 1))?;
+        let translated = if line.trim().is_empty() {
+            String::new()
+        } else {
+            match translator.translate(&line, source, target) {
+                // One line in, one line out: a translation never spans lines.
+                Ok(text) => text.split_whitespace().collect::<Vec<_>>().join(" "),
+                Err(e) => {
+                    writeln!(errors, "line {}: not translated: {e}", index + 1)?;
+                    String::new()
+                }
+            }
+        };
+        writeln!(output, "{translated}")?;
+        output.flush()?;
+    }
+    Ok(())
+}
+
 /// What the prompt calls a language or variety: "Mexican Spanish" for `es-MX`
 /// (`varieties.rs`). `translate` refuses a tag the table doesn't know before
 /// any prompt is built, so the tag itself is only a last resort here.
@@ -260,8 +303,8 @@ fn system_prompt(source: &str, target: &str) -> String {
             "a"
         };
         prompt.push_str(&format!(
-            "
-Write it the way {article} {target_name} speaker would say it aloud, using              everyday spoken wording rather than the formal written standard."
+            "\nWrite it the way {article} {target_name} speaker would say it aloud, using \
+             everyday spoken wording rather than the formal written standard."
         ));
     }
     prompt
@@ -417,6 +460,82 @@ mod tests {
     use super::*;
 
     #[test]
+    fn the_printed_prompt_is_the_prompt_volis_sends() {
+        for (source, target) in [("en", "es"), ("en", "es-MX")] {
+            let template = prompt_template(source, target);
+            assert_eq!(template, prompt_for("{text}", source, target));
+            assert!(
+                template.contains("<|im_start|>user\n{text}<|im_end|>"),
+                "{template}"
+            );
+            assert!(template.ends_with("<think>\n\n</think>\n\n"), "{template}");
+        }
+        // A target variety adds the dialect sentence; a plain language doesn't.
+        let mexican = prompt_template("en", "es-MX");
+        assert!(
+            mexican.contains(
+                "\nWrite it the way a Mexican Spanish speaker would say it aloud, using everyday"
+            ),
+            "{mexican}"
+        );
+        assert!(!prompt_template("en", "es").contains("Write it the way"));
+    }
+
+    #[test]
+    fn the_prompt_has_no_stray_whitespace() {
+        // A mangled line continuation once put 14 spaces into the dialect
+        // sentence. The prompt is now also what translators are trained and
+        // benchmarked on, so its exact text matters.
+        for (source, target) in [
+            ("en", "es"),
+            ("en", "es-MX"),
+            ("es-MX", "en"),
+            ("en", "ar-IQ"),
+        ] {
+            let prompt = system_prompt(source, target);
+            assert!(
+                !prompt.contains("  "),
+                "double space in {source}->{target}: {prompt:?}"
+            );
+            assert!(
+                !prompt.contains(" \n") && !prompt.contains("\n "),
+                "{prompt:?}"
+            );
+        }
+    }
+
+    /// Instant stand-in: upper-cases, and refuses the word "refuse".
+    struct Shouting;
+    impl Translator for Shouting {
+        fn translate(&mut self, text: &str, _: &str, _: &str) -> Result<String> {
+            if text.contains("refuse") {
+                return Err(anyhow!("the translation came back unchanged"));
+            }
+            Ok(format!("{}\n", text.to_uppercase()))
+        }
+    }
+
+    #[test]
+    fn translate_lines_keeps_one_output_line_per_input_line() {
+        let input = "hola\n\nplease refuse this\nadiós amigo\n  \n";
+        let (mut out, mut err) = (Vec::new(), Vec::new());
+        translate_lines(
+            &mut Shouting,
+            "es",
+            "en",
+            input.as_bytes(),
+            &mut out,
+            &mut err,
+        )
+        .unwrap();
+        let out = String::from_utf8(out).unwrap();
+        assert_eq!(out, "HOLA\n\n\nADIÓS AMIGO\n\n");
+        assert_eq!(out.lines().count(), input.lines().count());
+        let err = String::from_utf8(err).unwrap();
+        assert!(err.starts_with("line 3: not translated:"), "{err}");
+    }
+
+    #[test]
     fn a_reasoning_block_is_dropped() {
         let raw = "<think>\nThe user wants Spanish to English. The sentence is a question.\n\
                    </think>\n\nWhere is the station?";
@@ -523,10 +642,7 @@ mod tests {
             ("Hey man, what's up? Want to grab a bite?", "es", "es-MX"),
             ("What are you doing right now?", "ar", "ar-IQ"),
         ] {
-            println!(
-                "
-{text}"
-            );
+            println!("\n{text}");
             for target in [plain, dialect] {
                 let out = translator
                     .translate(text, "en", target)

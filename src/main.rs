@@ -35,6 +35,7 @@ use tracing::warn;
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
 use tracing_subscriber::EnvFilter;
+use tracing_subscriber::Layer;
 
 use crate::config::Config;
 use crate::models::{Entry, Role};
@@ -45,18 +46,39 @@ fn main() -> Result<()> {
         print!("{}", cli::HELP);
         return Ok(());
     }
+    // Needs no model and no files: exactly the prompt, nothing else on stdout.
+    if let cli::Command::PrintPrompt { source, target } = &command {
+        print!("{}", translate::prompt_template(source, target));
+        return Ok(());
+    }
 
     let root = paths::app_root().context("failed to locate the application directory")?;
 
     // Logging first, so everything after it is on the record. Held for the
-    // lifetime of main: dropping the guard would stop the file writer.
-    let _log_guard = init_logging(&root);
+    // lifetime of main: dropping the guard would stop the file writer. A
+    // command whose stdout is data logs to stderr instead, and skips the banner.
+    let data_on_stdout = command.stdout_is_data();
+    let _log_guard = init_logging(&root, data_on_stdout);
 
-    println!(
-        "Volis {} - offline, no network required",
-        env!("CARGO_PKG_VERSION")
-    );
-    println!("app root: {}", root.display());
+    if !data_on_stdout {
+        println!(
+            "Volis {} - offline, no network required",
+            env!("CARGO_PKG_VERSION")
+        );
+        println!("app root: {}", root.display());
+    }
+
+    if let cli::Command::Translate { source, target } = &command {
+        return translate_stdin(&root, source, target);
+    }
+    if let cli::Command::Transcribe {
+        engine,
+        language,
+        wavs,
+    } = &command
+    {
+        return transcribe_files(&root, engine, language, wavs);
+    }
 
     if command == cli::Command::Devices {
         return print_devices();
@@ -83,7 +105,12 @@ fn main() -> Result<()> {
             let options = pipeline::Options { write_wav, compare };
             return listen::run(&root, &config, seconds, options);
         }
-        cli::Command::Report | cli::Command::Devices | cli::Command::Help => {}
+        cli::Command::Report
+        | cli::Command::Devices
+        | cli::Command::Help
+        | cli::Command::PrintPrompt { .. }
+        | cli::Command::Translate { .. }
+        | cli::Command::Transcribe { .. } => {}
     }
 
     let models_root = paths::models_dir(&root);
@@ -111,6 +138,86 @@ fn main() -> Result<()> {
     report::print_summary(Role::Tts, &tts);
     report_selection(&config, &asr);
 
+    Ok(())
+}
+
+/// `volis --translate`: stdin to stdout, one line each, with the model in
+/// models/mt/ and every guard on, as a live session translates (M7.8).
+fn translate_stdin(root: &Path, source: &str, target: &str) -> Result<()> {
+    use crate::translate::LlamaTranslator;
+
+    let mt_dir = paths::mt_dir(root);
+    let model = models::find_translation_model(&mt_dir).map_err(|e| anyhow::anyhow!("{e}"))?;
+    let mut translator = LlamaTranslator::load(&model)?;
+    tracing::info!(
+        "translating stdin from {source} to {target} with {}",
+        model.display()
+    );
+    translate::translate_lines(
+        &mut translator,
+        source,
+        target,
+        std::io::stdin().lock(),
+        std::io::stdout().lock(),
+        std::io::stderr(),
+    )
+}
+
+/// `volis --transcribe`: WAV files through one recognizer, loaded once and
+/// run exactly as a live session runs it, one line per file (M7.9). A file
+/// that can't be read or transcribed gives an empty line and its reason on
+/// stderr, so line N always belongs to file N.
+fn transcribe_files(root: &Path, engine_name: &str, language: &str, wavs: &[String]) -> Result<()> {
+    use std::io::Write as _;
+
+    let asr_root = paths::asr_dir(root);
+    let engines = models::discover(&asr_root, Role::Asr);
+    let engine = engines
+        .iter()
+        .find_map(|e| match e {
+            Entry::Loaded(engine) if engine.dir_name == engine_name => Some(engine),
+            _ => None,
+        })
+        .ok_or_else(|| {
+            anyhow::anyhow!(
+                "no recognizer named \"{engine_name}\" in {}",
+                asr_root.display()
+            )
+        })?;
+    let base = varieties::language_of(language);
+    if !engine
+        .languages
+        .iter()
+        .any(|l| l.eq_ignore_ascii_case(base))
+    {
+        anyhow::bail!(
+            "\"{engine_name}\" doesn't list the language \"{base}\" (it lists {}); see its engine.toml in {}",
+            engine.languages.join(", "),
+            engine.dir.display()
+        );
+    }
+    let asr::AsrEngine::Segment(mut recognizer) = asr::load(engine)? else {
+        anyhow::bail!("\"{engine_name}\" isn't a segment recognizer");
+    };
+    recognizer.prepare(language)?;
+    tracing::info!(
+        "transcribing {} file(s) with {engine_name} as {language}",
+        wavs.len()
+    );
+    let mut out = std::io::stdout().lock();
+    for (n, wav) in wavs.iter().enumerate() {
+        let text = match wav::read_16k_mono(Path::new(wav))
+            .and_then(|pcm| recognizer.transcribe(&pcm, language))
+        {
+            Ok(text) => text.split_whitespace().collect::<Vec<_>>().join(" "),
+            Err(e) => {
+                eprintln!("file {}: not transcribed: {e:#}", n + 1);
+                String::new()
+            }
+        };
+        writeln!(out, "{text}")?;
+        out.flush()?;
+    }
     Ok(())
 }
 
@@ -217,12 +324,25 @@ fn report_selection(config: &Config, asr: &[Entry]) {
     }
 }
 
-/// stdout plus a rolling file in `<root>/logs` (SPEC §4). If the log directory
-/// cannot be created, `Volis` still runs and still logs to stdout - losing
-/// the file is not worth refusing to start over.
-fn init_logging(root: &Path) -> Option<tracing_appender::non_blocking::WorkerGuard> {
+/// The console plus a rolling file in `<root>/logs` (SPEC §4). The console is
+/// stdout, or stderr when `to_stderr` is set: for commands whose stdout is data
+/// for another program (--translate). If the log directory cannot be created,
+/// `Volis` still runs and still logs to the console - losing the file is not
+/// worth refusing to start over.
+fn init_logging(
+    root: &Path,
+    to_stderr: bool,
+) -> Option<tracing_appender::non_blocking::WorkerGuard> {
     let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
-    let stdout_layer = tracing_subscriber::fmt::layer().with_writer(std::io::stdout);
+    let stdout_layer = if to_stderr {
+        tracing_subscriber::fmt::layer()
+            .with_writer(std::io::stderr as fn() -> std::io::Stderr)
+            .boxed()
+    } else {
+        tracing_subscriber::fmt::layer()
+            .with_writer(std::io::stdout as fn() -> std::io::Stdout)
+            .boxed()
+    };
 
     let logs = paths::logs_dir(root);
     match std::fs::create_dir_all(&logs) {

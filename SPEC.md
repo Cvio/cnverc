@@ -605,6 +605,29 @@ prompt names the variety and asks for its spoken form; paired mode sends full ta
 `es-MX` logs `es` going to Whisper; two machines pair and the translation arrives in the right
 variety.
 
+**M7.8 - Training support commands.** Added after M7.7, before M8, approved to go ahead of the
+pending M7.5-M7.7 hand checks because it touches no mode, window or audio. The model-converter
+project trains the translator on dialect sentence pairs and needs two things only volis can give:
+`volis --print-prompt <source> <target>` prints the exact prompt `prompt_for` sends (with
+`{text}` for the words), so a translator is trained on precisely that; `volis --translate
+<source> <target>` translates stdin to stdout one line per line, with every guard on (a refused
+line is printed empty, its reason on stderr), so a trained translator is scored the way a live
+session runs it. Both keep stdout for their result only: no banner, and the console log goes to
+stderr. Neither touches the network. Specified in `docs/plans/training-commands.md`.
+*Check:* `volis --print-prompt en es-MX` prints the prompt and nothing else;
+`echo "My phone died." | volis --translate en es-MX` prints one Spanish line; five input lines,
+one empty, give five output lines; `volis --print-prompt en xx-XX` fails with a clear message and
+a non-zero exit code.
+
+**M7.9 - Persian, and a transcribe command, for model-bench.** The model-bench project tests
+complete volis configurations for Iraqi Arabic and Persian, and must prove it runs volis's engines
+exactly as volis does. Persian (`fa`) joins `src/varieties.rs`; Whisper's `engine.toml` lists
+Arabic and Persian, which it hears; and `volis --transcribe <recognizer> <language> <wav>...`
+transcribes 16 kHz mono WAV files with one recognizer, one line per file, like `--translate`
+(stdout for results only; a failed file prints empty with its reason on stderr).
+*Check:* `volis --print-prompt en fa` names Persian; `volis --transcribe whisper-large-v3-turbo fa
+<clip>` prints its transcript; Parakeet is refused for `fa`, naming the languages it lists.
+
 **M8 - Streaming ASR.** `StreamAsr` against `OnlineRecognizer` with a streaming model. `Partial`
 messages flowing to the caption pane. Commit policy: hold a prefix until it is unchanged across N
 successive updates before passing it downstream (LocalAgreement).

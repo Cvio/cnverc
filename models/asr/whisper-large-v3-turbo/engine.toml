@@ -1,7 +1,7 @@
 name = "Whisper large-v3-turbo (int8)"
 kind = "segment"
 backend = "whisper"
-languages = ["es", "en", "de", "fr", "it", "pt", "nl", "pl", "ru"]
+languages = ["es", "en", "de", "fr", "it", "pt", "nl", "pl", "ru", "ar", "fa"]
 
 [files]
 encoder = "turbo-encoder.int8.onnx"

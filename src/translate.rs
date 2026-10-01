@@ -260,8 +260,8 @@ fn system_prompt(source: &str, target: &str) -> String {
             "a"
         };
         prompt.push_str(&format!(
-            "
-Write it the way {article} {target_name} speaker would say it aloud, using              everyday spoken wording rather than the formal written standard."
+            "\nWrite it the way {article} {target_name} speaker would say it aloud, \
+             using everyday spoken wording rather than the formal written standard."
         ));
     }
     prompt
@@ -555,6 +555,15 @@ mod tests {
             "ar-IQ"
         ));
         assert!(system_prompt("es-MX", "en").contains("Translate the user's Mexican Spanish text"));
+        // Exact bytes: the dialect sentence is its own line, with no indentation
+        // or trailing whitespace leaking in from the source layout.
+        assert!(
+            prompt.ends_with(
+                "unchanged.\nWrite it the way an Iraqi Arabic speaker would say it aloud, \
+                 using everyday spoken wording rather than the formal written standard."
+            ),
+            "{prompt:?}"
+        );
     }
 
     #[test]

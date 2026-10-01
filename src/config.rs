@@ -332,9 +332,8 @@ impl Config {
 
 /// The comments written above the voice keys when Volis adds them, because
 /// which voice each key means is easy to get backwards.
-const VOICE_NOTE_LEFT: &str = "# left_voice speaks what the LEFT person said, so it is a voice in the RIGHT
-                               # person's language. A folder name under models/tts/; empty = first match.
-";
+const VOICE_NOTE_LEFT: &str = "# left_voice speaks what the LEFT person said, so it is a voice in the RIGHT\n\
+                               # person's language. A folder name under models/tts/; empty = first match.\n";
 const VOICE_NOTE_RIGHT: &str =
     "# right_voice speaks what the RIGHT person said, in the LEFT person's language.
 ";
@@ -575,6 +574,8 @@ right_asr = \"whisper-es\"
             1,
             "{saved}"
         );
+        // The note's second line starts at the left margin, like the first.
+        assert!(saved.contains("RIGHT\n# person's language."), "{saved:?}");
         let reloaded: Config = toml::from_str(&saved).expect("the saved file must parse");
         assert_eq!(
             reloaded.shared.right_voice,

@@ -64,6 +64,16 @@ pub const TABLE: &[Variety] = &[
         display: "Arabic (Jordan)",
         prompt: "Jordanian Arabic",
     },
+    Variety {
+        tag: "fa",
+        display: "Persian",
+        prompt: "Persian",
+    },
+    Variety {
+        tag: "fa-IR",
+        display: "Persian (Iran)",
+        prompt: "Iranian Persian",
+    },
     // Languages the translation prompt already knew by name, kept so they
     // don't stop working. They have no varieties yet.
     Variety {
@@ -201,6 +211,8 @@ mod tests {
     fn a_language_lists_only_its_own_varieties() {
         let arabic: Vec<_> = varieties_of("ar").iter().map(|v| v.tag).collect();
         assert_eq!(arabic, vec!["ar-IQ", "ar-JO"]);
+        let persian: Vec<_> = varieties_of("fa").iter().map(|v| v.tag).collect();
+        assert_eq!(persian, vec!["fa-IR"]);
         assert!(varieties_of("de").is_empty());
     }
 }

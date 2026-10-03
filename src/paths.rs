@@ -1,4 +1,4 @@
-//! Every path in `Volis` derives from the executable's own location.
+//! Every path in `volis-rust` derives from the executable's own location.
 //!
 //! SPEC §5: never the current working directory, never `%APPDATA%`, never the
 //! `dirs`/`directories` crates. Double-clicking from Explorer and launching
@@ -13,7 +13,7 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
 
-/// The directory containing `volis.exe`.
+/// The directory containing `volis-rust.exe`.
 pub fn app_root() -> Result<PathBuf> {
     let exe = std::env::current_exe()?.canonicalize()?;
     let root = exe.parent().context("exe has no parent")?;
@@ -21,7 +21,7 @@ pub fn app_root() -> Result<PathBuf> {
 }
 
 /// `canonicalize()` on Windows hands back a verbatim path (`\\?\C:\...`). It is
-/// correct but unreadable, and every error message in Volis quotes an
+/// correct but unreadable, and every error message in volis-rust quotes an
 /// absolute path back to the user (SPEC §14), so the prefix is dropped when
 /// what remains is an ordinary drive path. Anything else passes through
 /// untouched, including UNC paths, where the prefix is load-bearing.

@@ -1,9 +1,9 @@
-# How Volis is built
+# How volis-rust is built
 
 A guide for a developer who is new to this code. It explains what each part does, how the parts
 connect, how to find the cause of a problem, and how to make the common kinds of change.
 
-- To set Volis up or use it, read [README.md](README.md) and [USE-CASES.md](USE-CASES.md).
+- To set volis-rust up or use it, read [README.md](README.md) and [USE-CASES.md](USE-CASES.md).
 - For the models (what each does, `engine.toml`, how to add one), read [MODELS.md](MODELS.md).
 - For *why* things are the way they are (design decisions, build internals, measurements), read
   [TECHNICAL.md](TECHNICAL.md).
@@ -17,7 +17,7 @@ channels between threads, with no async and no macros of our own.
 
 ## 1. The big picture
 
-Volis is one program with no helpers and no servers. It listens to a microphone, works out
+volis-rust is one program with no helpers and no servers. It listens to a microphone, works out
 what was said, translates it, and says the translation out loud, all on the local machine:
 
 ```mermaid
@@ -190,7 +190,7 @@ and dialects came later ([docs/plans/dialect-per-side.md](docs/plans/dialect-per
 
 ### Paired mode, in depth
 
-Two Volis instances as the two ends of one conversation (SPEC §9).
+Two volis-rust instances as the two ends of one conversation (SPEC §9).
 
 - **What crosses the wire.** Text only: `wire.rs` is newline-delimited JSON over TCP, the
   messages in SPEC §9, so a connection can be faked with netcat. Each PC runs its whole
@@ -253,10 +253,10 @@ break something if you change them without care.
 **`cli.rs`:** turns command-line arguments into a `Command`. It's small on purpose; the
 controls belong in the window.
 
-**`paths.rs`:** every path Volis uses, all built from `app_root()`, the folder the program is
+**`paths.rs`:** every path volis-rust uses, all built from `app_root()`, the folder the program is
 in.
 - **Rule:** never use the working directory, `%APPDATA%`, `~/.cache`, or a `dirs` crate.
-  Volis must run from any folder it's copied to (SPEC §2.4).
+  volis-rust must run from any folder it's copied to (SPEC §2.4).
 
 **`config.rs`:** `volis.toml`.
 - `Config::load` reads it. Every section has defaults, so an older file still loads.
@@ -264,7 +264,7 @@ in.
   user's comments and layout.
 - **Rule:** every struct uses `deny_unknown_fields`, so a misspelt key is an error rather than
   silently ignored. A new key must be declared, with a default. See
-  [section 6](#add-a-volistoml-setting).
+  [section 6](#add-a-volis-rusttoml-setting).
 
 **`models.rs`:** model discovery ("the filesystem is the index"; the user's view is in
 [MODELS.md](MODELS.md)).
@@ -278,7 +278,7 @@ in.
   no "first match wins" anywhere.
 - **Rule:** model files keep their published names. `engine.toml` says which file is which.
 
-**`varieties.rs`:** the table of every language and variety Volis knows: a BCP 47 tag, the
+**`varieties.rs`:** the table of every language and variety volis-rust knows: a BCP 47 tag, the
 name the window shows, and the name written into the translation prompt.
 - `lookup`, `require` (an error naming the unknown tag), `language_of` (`es-MX` → `es`),
   `varieties_of`, `display_name`.
@@ -345,8 +345,8 @@ process.
 
 **`playback.rs`:** the speakers, and the **half-duplex gate**.
 - `Player` plays queued samples.
-- The `Gate` closes while Volis is speaking and for 150 ms afterwards. While it's closed, the
-  pipeline throws away microphone audio, so Volis never hears and re-translates its own voice.
+- The `Gate` closes while volis-rust is speaking and for 150 ms afterwards. While it's closed, the
+  pipeline throws away microphone audio, so volis-rust never hears and re-translates its own voice.
 - `PlaybackControl` lets the pipeline cut a reply off when someone takes a turn
   (`begin_turn`), release held replies (`end_turn`), or stop everything (`stop`, used by
   Escape).
@@ -409,14 +409,14 @@ Typing the address always works without it.
 
 ---
 
-## 4. Rules that keep Volis working
+## 4. Rules that keep volis-rust working
 
 These come from SPEC §2 and from problems that were found and fixed. Each is cheap to keep and
 expensive to break.
 
 | Rule | Why |
 |---|---|
-| **No internet, ever.** No downloads, update checks or DNS lookups at runtime. | Volis must work with the network unplugged. Local sockets between two PCs are fine. |
+| **No internet, ever.** No downloads, update checks or DNS lookups at runtime. | volis-rust must work with the network unplugged. Local sockets between two PCs are fine. |
 | **Paths only from `paths::app_root()`.** | The whole folder can be copied anywhere, including to another PC, and still work. |
 | **Windows: static CRT, and llama.cpp without `openmp`** (`.cargo/config.toml`, `Cargo.toml`). | The program must run on a PC with nothing installed, with no Visual C++ redistributable. |
 | **Linux: sherpa-onnx as a shared library** (a target-specific entry in `Cargo.toml`). | The ready-made static Linux library crashes when a model loads. Keep this Linux-only. |
@@ -497,7 +497,7 @@ No code change is needed.
 | "Not translated: …" | `translate.rs`: which guard refused it, named in the message |
 | No voice | "No voice installed for …" in the settings; `tts::for_language`; the Shared column's warning |
 | The wrong voice or recognizer is picked | `models::rank`, and the model's `varieties` in `engine.toml`; `--report` shows each one's "tuned for" |
-| Volis translates its own voice | The half-duplex gate: "Mute the microphone while speaking" must be on with speakers (`playback.rs`) |
+| volis-rust translates its own voice | The half-duplex gate: "Mute the microphone while speaking" must be on with speakers (`playback.rs`) |
 | The window won't open | The log's last lines; on Windows, `gui::graphics_setup` |
 | Pairing problems | The pairing panel's message; `peer.rs` `diagnose`; the log's `paired mode:` lines |
 | A Shared-mode key does nothing | That column's status or reason; `Session::shared_press`; a focused text box |
@@ -506,9 +506,9 @@ No code change is needed.
 
 - Everything is logged to `logs/volis.log.<date>` next to the program, and to the console
   window.
-- For more detail, start Volis from a terminal with `RUST_LOG=debug` (Git Bash:
-  `RUST_LOG=debug ./volis.exe`), or narrow it to one module, as in
-  `RUST_LOG=info,volis::peer=debug`.
+- For more detail, start volis-rust from a terminal with `RUST_LOG=debug` (Git Bash:
+  `RUST_LOG=debug ./volis-rust.exe`), or narrow it to one module, as in
+  `RUST_LOG=info,volis-rust::peer=debug`.
 - `--listen --wav` also writes each utterance to `logs/segments/`, which is how a misheard
   sentence gets diagnosed.
 - Lines to know:
@@ -524,7 +524,7 @@ Copy the program into a scratch folder with its own `volis.toml` and empty
 settings. For a full test, point it at the real models with a Windows junction:
 
 ```
-mklink /J <scratch>\models <volis>\target\release\models
+mklink /J <scratch>\models <volis-rust>\target\release\models
 ```
 
 Remove it afterwards with `rmdir`, which removes only the link. **Don't** delete the scratch
@@ -556,20 +556,20 @@ refuses to add a second resampling path. Convert with
 ### Testing without a person talking
 
 - **Windows:** with a virtual audio cable (VB-Audio), play a recording into the cable's input
-  and set Volis's microphone to its output.
+  and set volis-rust's microphone to its output.
 - **Linux:** make a clip with a Piper voice and play it through the speakers into a running
   `--listen`:
 
   ```bash
   V=target/release/models/tts/vits-piper-en_US-lessac-medium
   sherpa-onnx-offline-tts --vits-model=$V/en_US-lessac-medium.onnx --vits-tokens=$V/tokens.txt --vits-data-dir=$V/espeak-ng-data --output-filename=en.wav "Where is the train station?"
-  ./target/release/volis --listen --seconds 60 &
+  ./target/release/volis-rust --listen --seconds 60 &
   sleep 30; aplay en.wav; wait
   ```
 
   `sherpa-onnx-offline-tts` is in the shared sherpa-onnx build's `bin/`. The models take about
   20 s to load, hence the 30 s wait. The same clip run through `sherpa-onnx-offline` checks
-  sherpa-onnx itself, with no Volis involved.
+  sherpa-onnx itself, with no volis-rust involved.
 
 ---
 
@@ -593,7 +593,7 @@ cp -r models volis.toml target/debug/ && ./setup-models.sh target/debug
 there, and is the only place the model download URLs are written down.
 
 - Windows needs the Build Tools' CMake on PATH for a plain `cargo build` (`setup.sh` finds it).
-  Close Volis before rebuilding: a running program can't be replaced ("Access is denied").
+  Close volis-rust before rebuilding: a running program can't be replaced ("Access is denied").
 - On Linux, set `SHERPA_ONNX_LIB_DIR` to the library `build-sherpa-linux.sh` built (it prints
   the path), and use `-j2` on smaller machines.
 

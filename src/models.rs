@@ -1,6 +1,6 @@
 //! Model discovery: the filesystem is the index (SPEC §6).
 //!
-//! `Volis` enumerates the subdirectories of `models/asr/` and `models/tts/`,
+//! `volis-rust` enumerates the subdirectories of `models/asr/` and `models/tts/`,
 //! parses the `engine.toml` in each, and reports what it found. Adding a model
 //! means dropping a folder in and restarting. There is no registry, no
 //! database, no cache, and no download UI - and every file on disk keeps the
@@ -27,7 +27,7 @@ use tracing::warn;
 
 use crate::varieties;
 
-/// The file that describes a model directory to `Volis`.
+/// The file that describes a model directory to `volis-rust`.
 pub const ENGINE_TOML: &str = "engine.toml";
 
 /// Interaction shape of a recognizer (SPEC §11). Whisper and Parakeet hand
@@ -57,7 +57,7 @@ pub enum AsrBackend {
 
 /// Which sherpa-onnx `OfflineTts` model config variant a TTS directory maps to.
 ///
-/// Only what Volis can actually load is listed. sherpa-onnx supports several
+/// Only what volis-rust can actually load is listed. sherpa-onnx supports several
 /// more, but claiming them in discovery and then failing at load time would
 /// put the error in the wrong place.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -397,12 +397,12 @@ pub fn load_engine(dir: &Path, role: Role) -> Result<Engine, EngineError> {
         }
     };
 
-    // Every variety must be one Volis knows, and belong to a language the
+    // Every variety must be one volis-rust knows, and belong to a language the
     // model lists: a Spanish voice tuned for "fr-FR" is a mistake to show,
     // not a model to use.
     for variety in &raw.varieties {
         let reason = match varieties::lookup(variety) {
-            None => Some("not a variety Volis knows (add it to src/varieties.rs)".to_string()),
+            None => Some("not a variety volis-rust knows (add it to src/varieties.rs)".to_string()),
             Some(_) if !varieties::has_variety(variety) => Some(
                 "a variety names a region, like \"es-MX\"; plain languages go in `languages`"
                     .to_string(),
@@ -758,7 +758,7 @@ tokens = \"t.txt\"
 /// There is no `volis.toml` key naming it, because §7 does not define one,
 /// so the filesystem is the index here too: exactly one `.gguf` means that is
 /// the model. Two means the user has to say which by removing one, and being
-/// told that is better than Volis picking for them (SPEC §15).
+/// told that is better than volis-rust picking for them (SPEC §15).
 pub fn find_translation_model(mt_dir: &Path) -> Result<PathBuf, TranslationModelError> {
     let read_dir =
         std::fs::read_dir(mt_dir).map_err(|source| TranslationModelError::Unreadable {
@@ -804,7 +804,7 @@ pub enum TranslationModelError {
         source: std::io::Error,
     },
     #[error(
-        "no .gguf translation model in {path}\nVolis never downloads models; put one there \
+        "no .gguf translation model in {path}\nvolis-rust never downloads models; put one there \
          (see README.md) and run again."
     )]
     None { path: PathBuf },

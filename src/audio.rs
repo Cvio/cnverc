@@ -221,7 +221,7 @@ pub fn spawn_capture(device_name: &str, out: SyncSender<Vec<f32>>) -> Result<Cap
 }
 
 /// Empty name = the system default. A named device that is not present is an
-/// error naming what was asked for; Volis never quietly picks another one.
+/// error naming what was asked for; volis-rust never quietly picks another one.
 fn select_input_device(device_name: &str) -> Result<Device> {
     let host = cpal::default_host();
     if device_name.trim().is_empty() {

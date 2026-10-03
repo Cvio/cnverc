@@ -2,7 +2,7 @@
 //!
 //! sherpa's `VoiceActivityDetector` does the segmenting itself - it is fed
 //! fixed windows and hands back complete speech segments with their start
-//! offset - so Volis does not run a second segmentation state machine on top
+//! offset - so volis-rust does not run a second segmentation state machine on top
 //! of it. The `[vad]` keys in `volis.toml` map straight onto its config.
 //!
 //! In turn-based mode (Milestone 6) this same detector is used only to trim
@@ -104,12 +104,12 @@ pub struct Segmenter {
 
 impl Segmenter {
     /// Load the model and configure the detector. A missing model file is an
-    /// error naming the absolute path; Volis never downloads it (SPEC §2.1).
+    /// error naming the absolute path; volis-rust never downloads it (SPEC §2.1).
     pub fn new(settings: &VadSettings) -> Result<Self> {
         let model = absolute(&settings.model);
         if !model.is_file() {
             return Err(anyhow!(
-                "VAD model not found: {}\nVolis never downloads models; place silero_vad.onnx \
+                "VAD model not found: {}\nvolis-rust never downloads models; place silero_vad.onnx \
                  at that exact path (see README.md) and run again.",
                 model.display()
             ));
@@ -307,7 +307,7 @@ mod tests {
             .is_absolute(),
             "{message}"
         );
-        // It says Volis will not fetch it; it never offers a URL to fetch.
+        // It says volis-rust will not fetch it; it never offers a URL to fetch.
         assert!(message.contains("never downloads"), "{message}");
         assert!(!message.contains("http"), "{message}");
     }

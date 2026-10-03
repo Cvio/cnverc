@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 #
-# setup.sh - build Volis and get it ready to run.
+# setup.sh - build volis-rust and get it ready to run.
 #
-# Run it from the Volis folder, on a PC with internet:
+# Run it from the volis-rust folder, on a PC with internet:
 #
 #   ./setup.sh
 #
-# It checks your tools, builds Volis, puts its settings file and model
+# It checks your tools, builds volis-rust, puts its settings file and model
 # folders next to the program, downloads the models, and checks the result.
 #
 # Safe to run again at any time, and it is how you update: after `git pull`,
@@ -23,8 +23,8 @@ say()  { printf '\n=== %s\n' "$1"; }
 stop() { printf '\n!!! %s\n' "$1" >&2; [ -n "${2:-}" ] && printf '    %s\n' "$2" >&2; exit 1; }
 
 case "$(uname -s)" in
-  MINGW*|MSYS*|CYGWIN*) os=windows; exe="$DEST/volis.exe" ;;
-  Linux)                os=linux;   exe="$DEST/volis" ;;
+  MINGW*|MSYS*|CYGWIN*) os=windows; exe="$DEST/volis-rust.exe" ;;
+  Linux)                os=linux;   exe="$DEST/volis-rust" ;;
   *) stop "This script supports Windows (Git Bash) and Linux; this is $(uname -s)." ;;
 esac
 
@@ -33,12 +33,12 @@ say "1/5  Checking your tools"
 ./check-setup.sh || stop "Install what check-setup.sh listed as MISSING, then run ./setup.sh again."
 
 # --- 2. Build ----------------------------------------------------------------------
-say "2/5  Building Volis (the first time takes 10-20 minutes)"
+say "2/5  Building volis-rust (the first time takes 10-20 minutes)"
 jobs=()
 if [ "$os" = windows ]; then
-  # A running Volis holds its own file, and the build fails with "Access is
+  # A running volis-rust holds its own file, and the build fails with "Access is
   # denied" when it tries to replace it.
-  for running in volis.exe cnverc.exe; do
+  for running in volis-rust.exe cnverc.exe; do
     if tasklist //FI "IMAGENAME eq $running" 2>/dev/null | grep -qi "$running"; then
       stop "$running is running. Close its window, then run ./setup.sh again."
     fi
@@ -69,21 +69,21 @@ cargo build --release "${jobs[@]}" ||
 [ -f "$exe" ] || stop "The build finished but $exe isn't there."
 
 # --- 3. Settings file and model folders ---------------------------------------------
-say "3/5  Putting the settings file and model folders next to Volis"
-# Volis used to be called cnverc. Keep an older install's settings by renaming
+say "3/5  Putting the settings file and model folders next to volis-rust"
+# volis-rust used to be called cnverc. Keep an older install's settings by renaming
 # its file, and remove the old program so two aren't left side by side.
 if [ -f "$DEST/cnverc.toml" ]; then
   if [ -e "$DEST/volis.toml" ]; then
     echo "    left $DEST/cnverc.toml alone: $DEST/volis.toml already exists and is the one used"
   else
     mv "$DEST/cnverc.toml" "$DEST/volis.toml"
-    echo "    renamed your settings: $DEST/cnverc.toml -> $DEST/volis.toml (cnverc is now called Volis)"
+    echo "    renamed your settings: $DEST/cnverc.toml -> $DEST/volis.toml (cnverc is now called volis-rust)"
   fi
 fi
 if [ "$os" = windows ]; then old_files=(cnverc.exe cnverc.pdb cnverc.d); else old_files=(cnverc cnverc.d); fi
 for old in "${old_files[@]}"; do
   if [ -f "$DEST/$old" ]; then
-    rm -f "$DEST/$old" && echo "    removed the old program file $DEST/$old (cnverc is now called Volis)"
+    rm -f "$DEST/$old" && echo "    removed the old program file $DEST/$old (cnverc is now called volis-rust)"
   fi
 done
 # File by file, never replacing one that is already there: that would throw
@@ -102,7 +102,7 @@ while IFS= read -r -d '' source; do
 done < <(find models volis.toml -type f -print0)
 echo "    added $added file(s)"
 if [ "${#kept_different[@]}" -gt 0 ]; then
-  echo "    kept yours, although the version in the Volis folder is different:"
+  echo "    kept yours, although the version in the volis-rust folder is different:"
   for file in "${kept_different[@]}"; do
     echo "      $DEST/$file"
   done
@@ -115,21 +115,21 @@ say "4/5  Downloading the models (about 2.4 GB the first time; skipped if alread
 ./setup-models.sh "$DEST" || stop "Some models didn't download. Run ./setup.sh again to retry them."
 
 # --- 5. Check -----------------------------------------------------------------------
-say "5/5  Checking that Volis finds everything"
+say "5/5  Checking that volis-rust finds everything"
 report=$("$exe" --report 2>&1)
 status=$?
 echo "$report" | sed -n '/^summary:/,$p'
 if [ "$status" -ne 0 ] || echo "$report" | grep -q -e 'DISABLED' -e '\[!\]'; then
   echo "$report"
-  stop "Volis is missing something (see DISABLED or [!] above)." \
+  stop "volis-rust is missing something (see DISABLED or [!] above)." \
        "Run ./setup.sh again. If it keeps happening, see 'If something goes wrong' in README.md."
 fi
 
 echo
-echo "Everything is in place. Start Volis with:"
+echo "Everything is in place. Start volis-rust with:"
 echo
 echo "    ./$exe"
 echo
 if [ "$os" = windows ]; then
-  echo "or double-click volis.exe in the $DEST folder."
+  echo "or double-click volis-rust.exe in the $DEST folder."
 fi

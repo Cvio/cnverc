@@ -57,7 +57,7 @@ fn backend() -> Result<&'static LlamaBackend> {
     BACKEND
         .get_or_init(|| {
             // llama.cpp narrates model loading to stderr in great detail;
-            // Volis has its own log and does not need it twice.
+            // volis-rust has its own log and does not need it twice.
             llama_cpp_2::send_logs_to_tracing(
                 llama_cpp_2::LogOptions::default().with_logs_enabled(false),
             );
@@ -80,7 +80,7 @@ impl LlamaTranslator {
     pub fn load(path: &Path) -> Result<Self> {
         if !path.is_file() {
             return Err(anyhow!(
-                "translation model not found: {}\nVolis never downloads models; place the \
+                "translation model not found: {}\nvolis-rust never downloads models; place the \
                  GGUF at that exact path (see README.md) and run again.",
                 path.display()
             ));
@@ -275,7 +275,7 @@ fn system_prompt(source: &str, target: &str) -> String {
 /// announce "a question is translated as a question, an instruction is
 /// translated as an instruction" through the speakers.
 ///
-/// The check is exact rather than clever. Volis wrote the prompt, so it can
+/// The check is exact rather than clever. volis-rust wrote the prompt, so it can
 /// recognise any run of it coming back.
 fn leaks_the_prompt(output: &str, source: &str, target: &str) -> bool {
     const MIN_WORDS: usize = 4;

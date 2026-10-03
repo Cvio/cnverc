@@ -1,4 +1,4 @@
-//! Playback, and the half-duplex gate that keeps Volis from hearing itself.
+//! Playback, and the half-duplex gate that keeps volis-rust from hearing itself.
 //!
 //! SPEC §10: with TTS playing through speakers and the microphone live, the
 //! VAD triggers on the translated speech and the recognizer transcribes it,
@@ -533,7 +533,7 @@ mod tests {
     ///
     /// A virtual audio cable makes the feedback path of SPEC §10 exact and
     /// silent: playback goes into the cable's input, capture comes out of its
-    /// output, so Volis hears its own voice at full level with no speakers
+    /// output, so volis-rust hears its own voice at full level with no speakers
     /// involved. The test runs twice - with the gate off, to prove the loop is
     /// real and the recognizer would hear itself, and with the gate on, which
     /// must produce nothing at all.

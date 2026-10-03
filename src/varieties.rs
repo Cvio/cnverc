@@ -1,7 +1,7 @@
 //! Languages and their varieties (dialects), by BCP 47 tag.
 //!
 //! A tag is a language, optionally with a region: `es` is Spanish with no
-//! particular dialect, `es-MX` is Mexican Spanish. Everywhere Volis stores a
+//! particular dialect, `es-MX` is Mexican Spanish. Everywhere volis-rust stores a
 //! language it may store a variety instead, and old settings with plain codes
 //! keep working.
 //!
@@ -21,7 +21,7 @@ pub struct Variety {
     pub prompt: &'static str,
 }
 
-/// Every language and variety Volis knows. Languages first, each followed by
+/// Every language and variety volis-rust knows. Languages first, each followed by
 /// its varieties.
 pub const TABLE: &[Variety] = &[
     Variety {
@@ -114,7 +114,7 @@ pub fn lookup(tag: &str) -> Option<&'static Variety> {
 pub fn require(tag: &str) -> Result<&'static Variety, String> {
     lookup(tag).ok_or_else(|| {
         format!(
-            "\"{}\" is not a language or variety Volis knows. Known: {}. To add one, add a row \
+            "\"{}\" is not a language or variety volis-rust knows. Known: {}. To add one, add a row \
              to src/varieties.rs.",
             tag.trim(),
             TABLE.iter().map(|v| v.tag).collect::<Vec<_>>().join(", ")

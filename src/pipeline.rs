@@ -167,7 +167,7 @@ pub enum PipelineMsg {
     /// Paired mode: a turn was asked for and did not happen, and why. The
     /// microphone stayed closed.
     FloorRefused(String),
-    /// Paired mode: other Volis PCs heard on the local network.
+    /// Paired mode: other volis-rust PCs heard on the local network.
     Discovered(Vec<Found>),
     /// Something went wrong. Always shown, never only logged.
     Error(String),
@@ -505,7 +505,7 @@ fn run(root: &Path, config: &Config, options: &Options, wiring: RunWiring) -> Re
         )?;
         if !config.tts.half_duplex {
             warn!(
-                "[tts].half_duplex is off: Volis will hear its own speech and transcribe it \
+                "[tts].half_duplex is off: volis-rust will hear its own speech and transcribe it \
                  unless you are wearing headphones (SPEC §10)"
             );
         }
@@ -1033,7 +1033,7 @@ impl Recognizers {
     }
 }
 
-/// Log how much memory Volis is using. The models run on the CPU, so this is
+/// Log how much memory volis-rust is using. The models run on the CPU, so this is
 /// the memory that matters; a second recognizer roughly adds its size.
 fn log_memory(when: &str) {
     match memory_stats::memory_stats() {
@@ -1826,7 +1826,7 @@ mod tests {
     /// at either end (SPEC §8, Milestone 6's check).
     ///
     /// The sentences are separate recordings, joined with pauses between them.
-    /// The turn is transcribed as Volis does it, in one pass up to 25 s, and
+    /// The turn is transcribed as volis-rust does it, in one pass up to 25 s, and
     /// also one sentence at a time; the single pass must not lose what the
     /// sentence-by-sentence pass keeps.
     ///

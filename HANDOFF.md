@@ -1,5 +1,8 @@
 # Handoff: where Volis stands, for the next session
 
+> Renamed from volis to volis-rust on 2026-10-03. The name volis now belongs to the Python
+> implementation, in its own repo.
+
 Last updated 2026-09-27. Read this first, then `CLAUDE.md` (the hard constraints, the
 working rules, and which document holds what), then `SPEC.md` (the build specification).
 

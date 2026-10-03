@@ -5,7 +5,7 @@
 //! hashes, no ids.
 //!
 //! A key left out of a section takes its §7 default: the file is meant to be
-//! written by hand, and a missing line should not stop Volis starting. A key
+//! written by hand, and a missing line should not stop volis-rust starting. A key
 //! that is not in §7 is still an error, because it is almost always a typo.
 
 use std::path::Path;
@@ -233,7 +233,7 @@ impl Config {
             }
         };
         // A file that does not parse is not overwritten: whatever is wrong with
-        // it is the user's to see, not Volis' to erase.
+        // it is the user's to see, not volis-rust' to erase.
         let mut doc: toml_edit::DocumentMut = existing
             .parse()
             .with_context(|| format!("failed to parse {}; not overwriting it", path.display()))?;
@@ -330,7 +330,7 @@ impl Config {
     }
 }
 
-/// The comments written above the voice keys when Volis adds them, because
+/// The comments written above the voice keys when volis-rust adds them, because
 /// which voice each key means is easy to get backwards.
 const VOICE_NOTE_LEFT: &str = "# left_voice speaks what the LEFT person said, so it is a voice in the RIGHT\n\
                                # person's language. A folder name under models/tts/; empty = first match.\n";

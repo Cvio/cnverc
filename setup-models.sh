@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 #
-# setup-models.sh - download every model Volis needs.
+# setup-models.sh - download every model volis-rust needs.
 #
-# Run it once, from the Volis folder, on a PC with internet:
+# Run it once, from the volis-rust folder, on a PC with internet:
 #
 #   ./setup-models.sh
 #
@@ -47,12 +47,12 @@ unpack() {
 }
 
 if [ ! -d "$DEST" ]; then
-  warn "$DEST does not exist. Build Volis first (cargo build --release)."
+  warn "$DEST does not exist. Build volis-rust first (cargo build --release)."
   exit 1
 fi
 
 if [ ! -d "$MODELS" ]; then
-  warn "$MODELS does not exist. Run this from the Volis folder, after:  cp -r models volis.toml $DEST/"
+  warn "$MODELS does not exist. Run this from the volis-rust folder, after:  cp -r models volis.toml $DEST/"
   exit 1
 fi
 
@@ -117,6 +117,6 @@ if [ "$failed" -ne 0 ]; then
 fi
 
 printf 'All seven downloaded into %s\n' "$MODELS"
-printf 'Now check them with:   %s/volis --report\n' "$DEST"
-printf '(on Windows: %s/volis.exe --report)\n' "$DEST"
+printf 'Now check them with:   %s/volis-rust --report\n' "$DEST"
+printf '(on Windows: %s/volis-rust.exe --report)\n' "$DEST"
 printf 'When the report is clean you can delete the %s folder.\n' "$DL"

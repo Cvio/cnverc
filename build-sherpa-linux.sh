@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 #
-# build-sherpa-linux.sh - build the speech library Volis needs on Linux. Once.
+# build-sherpa-linux.sh - build the speech library volis-rust needs on Linux. Once.
 #
 #   ./build-sherpa-linux.sh
 #
-# On Windows the Volis build downloads this library ready-made. The
+# On Windows the volis-rust build downloads this library ready-made. The
 # ready-made Linux one crashes as soon as it loads a model ("free(): invalid
 # pointer"), so on Linux it is built here from source, against the system's
 # onnxruntime, as a shared library. It takes about an hour and is only needed

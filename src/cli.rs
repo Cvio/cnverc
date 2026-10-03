@@ -25,10 +25,10 @@ pub enum Command {
 }
 
 pub const HELP: &str = "\
-Volis - offline speech-to-speech translation
+Volis (Rust) - offline speech-to-speech translation
 
 USAGE:
-    volis [COMMAND]
+    volis-rust [COMMAND]
 
 COMMANDS:
     (none)              Open the window
@@ -44,7 +44,7 @@ OPTIONS FOR --listen:
 
     -h, --help          Show this message
 
-Volis never accesses the internet. Models are read from models/ beside the
+volis-rust never accesses the internet. Models are read from models/ beside the
 executable; see README.md for what to put there.
 ";
 

@@ -16,8 +16,8 @@ means writing `ar-IQ.yaml` and running the same seven steps.
 | 3. Recognition LoRA | Tune Whisper on the dialect's speech | A tuned Whisper |
 | 4. Translation pairs | Turn the dialect transcripts into translation pairs with a larger model | Pairs in both directions |
 | 5. Translation LoRA | Tune Qwen on those pairs | A tuned Qwen |
-| 6. Export | Convert both into Volis's formats | A model folder and a `.gguf` |
-| 7. Verify | Re-measure inside Volis | The acceptance result |
+| 6. Export | Convert both into volis-rust's formats | A model folder and a `.gguf` |
+| 7. Verify | Re-measure inside volis-rust | The acceptance result |
 
 Three rules make it swappable, and they hold for every dialect:
 
@@ -25,7 +25,7 @@ Three rules make it swappable, and they hold for every dialect:
    language codes, the scoring normalizer and the output names all come from the profile.
 2. **Every score is compared to a baseline and to a general regression set.** The baseline says
    whether tuning helped; the regression set says whether it broke something else.
-3. **The final score is taken inside Volis, after export.** Compressing to int8 and Q4 can erase
+3. **The final score is taken inside volis-rust, after export.** Compressing to int8 and Q4 can erase
    a gain that looked real in training.
 
 ## The dialect profile
@@ -60,7 +60,7 @@ mt:
   directions: [dialect-en, en-dialect]
   regression: { hf: openlanguagedata/flores_plus, config: spa_Latn }
 
-volis:
+volis-rust:
   asr_folder: whisper-large-v3-turbo-es-mx
   mt_file: qwen3-1.7b-es-mx-q4_k_m.gguf
 ```
@@ -76,13 +76,13 @@ can point at its own language in both.
 
 ## Where it lives and the environment
 
-**A separate repository, `volis-tune`.** Training is Python, and Volis's own rules keep its
-repository free of other toolchains. The two meet at one point: `volis-tune` produces a model
-folder and a `.gguf`, and those are copied into Volis's `models/`. Volis never learns how they
+**A separate repository, `volis-rust-tune`.** Training is Python, and volis-rust's own rules keep its
+repository free of other toolchains. The two meet at one point: `volis-rust-tune` produces a model
+folder and a `.gguf`, and those are copied into volis-rust's `models/`. volis-rust never learns how they
 were made.
 
 ```
-volis-tune/
+volis-rust-tune/
   profiles/            es-MX.yaml, later ar-IQ.yaml
   steps/               one script per step, each taking --profile
   runs/<id>/           everything a run produces: data, scores, checkpoints, exports
@@ -99,7 +99,7 @@ translation scores, and llama.cpp for the GGUF conversion.
 **Check:** `torch.cuda.is_available()` is true, and a ten-step dummy LoRA run on Whisper finishes
 without error. Run it before downloading anything large.
 
-Internet is needed here, for downloading datasets and models. That doesn't touch Volis's
+Internet is needed here, for downloading datasets and models. That doesn't touch volis-rust's
 no-internet rule, which is about the app at runtime.
 
 ## Step 1: prepare the data
@@ -136,7 +136,7 @@ translation. A dialect rate well above the general one is the case for tuning. U
 rather than a fixed threshold is what keeps the gate meaningful across languages, since Arabic's
 general error rate starts far higher than Spanish's.
 
-Run the Qwen baseline with **Volis's translation prompt, copied verbatim from `translate.rs`**.
+Run the Qwen baseline with **volis-rust's translation prompt, copied verbatim from `translate.rs`**.
 A score taken with a different prompt measures a different system.
 
 **Check:** all four numbers written to `results.md`, and a decision recorded: tune recognition, or
@@ -171,7 +171,7 @@ Keep the adapter separate at this point; merging happens in Step 6.
 ## Step 4: build the translation pairs
 
 There is no ready dialect-to-English corpus, so make one. The recognition transcripts are
-authentic dialect in exactly the style Volis's translator will receive; a much larger
+authentic dialect in exactly the style volis-rust's translator will receive; a much larger
 **teacher** model translates them into English, and the small model learns from those
 translations. This is distillation.
 
@@ -198,9 +198,9 @@ whole downstream result is capped by this number. Record the pair counts per dir
 Tune `Qwen/Qwen3-1.7B` with LoRA in full precision, rank 16, alpha 32, on all linear layers, for
 2–3 epochs. Two things matter more than the settings:
 
-- **Train in Volis's exact prompt**, copied from `translate.rs`, including its chat format and
+- **Train in volis-rust's exact prompt**, copied from `translate.rs`, including its chat format and
   how it handles Qwen3's thinking block. A model trained on one prompt format and run with another
-  loses most of what it learned. Done this way, the first dialect needs no change to Volis's code
+  loses most of what it learned. Done this way, the first dialect needs no change to volis-rust's code
   at all.
 - **Mix in general translation pairs**, around a fifth of the data, so the model keeps its
   breadth. FLORES+ **dev** can supply them; **devtest** stays untouched for scoring.
@@ -212,7 +212,7 @@ and FLORES+ devtest chrF falls by no more than about one point. Then read 20 tra
 A higher score with stiffer output is a warning sign that the teacher's style, not the dialect, is
 what got learned.
 
-## Step 6: export into Volis
+## Step 6: export into volis-rust
 
 **Recognition**, the four steps from `DIALECTS.md`: merge the adapter into Whisper; convert the
 Hugging Face checkpoint to OpenAI's original format; run sherpa-onnx's
@@ -225,20 +225,20 @@ profile. It appears in the recognizer picker beside the stock Whisper, which sta
 quantize to Q4_K_M. `models/mt/` holds exactly one `.gguf`, so move the stock file somewhere safe
 rather than deleting it - comparing the two means swapping them by hand.
 
-**Check:** `volis --report` shows the new recognizer as `ok` and finds the new `.gguf`.
+**Check:** `volis-rust --report` shows the new recognizer as `ok` and finds the new `.gguf`.
 
-## Step 7: re-measure inside Volis
+## Step 7: re-measure inside volis-rust
 
 This is the acceptance test. Everything before it was measured in PyTorch at full precision;
-Volis runs int8 and Q4, and compression can quietly take a gain back.
+volis-rust runs int8 and Q4, and compression can quietly take a gain back.
 
-- **Recognition:** play test-set clips through `volis --listen --compare` with stock and tuned
+- **Recognition:** play test-set clips through `volis-rust --listen --compare` with stock and tuned
   Whisper both installed, and score both against the references with the same normalizer.
 - **Translation:** re-run `bench_both_directions` and the translation test set with the tuned
   `.gguf`, then with the stock one.
 - **Live:** a real conversation. Numbers can improve while the experience doesn't.
 
-**Check:** the tuned models still beat stock inside Volis, on both the dialect and the regression
+**Check:** the tuned models still beat stock inside volis-rust, on both the dialect and the regression
 sets. If a gain survives training but not export, the compression is eating it - try Q5_K_M or
 Q8_0 for Qwen before retraining anything. Record the final numbers in `results.md`: that line is
 the result of the whole run.
@@ -275,7 +275,7 @@ diacritics, unify the alef variants, and fold *ta marbuta* into *ha* and *alef m
 *ya*. Even then, report character error rate alongside word error rate; it forgives spelling
 variants that word error rate punishes.
 
-**3. Volis needs a code change first.** `language_name` in `translate.rs` doesn't know Arabic, so
+**3. volis-rust needs a code change first.** `language_name` in `translate.rs` doesn't know Arabic, so
 the prompt would say "into ar". Fix that before Step 2, or the baseline is measuring a prompt bug.
 
 The gate in Step 2 behaves differently here, and it should: expect the dialect error rate to sit
@@ -286,7 +286,7 @@ far above FLEURS, which is the case for doing Step 3 at all.
 **Decided:**
 
 - **Restore capitalization and punctuation before training.** CIEMPIESS transcripts are lowercase
-  with no punctuation. Trained on them as-is, Whisper would stop punctuating, and Volis's
+  with no punctuation. Trained on them as-is, Whisper would stop punctuating, and volis-rust's
   captions would lose it. Having the teacher restore case and punctuation once, in Step 1, changes
   no words - colloquial spellings like *pus* and *namás* stay - and the scores are unaffected
   because the normalizer strips both anyway. The fallback, if the teacher punctuates badly, is to
